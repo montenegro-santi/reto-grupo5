@@ -1,0 +1,225 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: VPC con 3 Subredes Públicas (Ubuntu/Windows) y 3 Privadas conectadas a NAT Gateway - BIT
+
+Parameters:
+  KeyName:
+    Type: AWS::EC2::KeyPair::KeyName
+    Description: Nombre del KeyPair para acceso SSH/RDP
+    Default: vockey
+
+  UbuntuAMI:
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Default: /aws/service/canonical/ubuntu/server/22.04/stable/current/amd64/hvm/ebs-gp2/ami-id
+
+  WindowsAMI:
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Default: /aws/service/ami-windows-latest/Windows_Server-2025-English-Full-Base
+
+Resources:
+  # ========== VPC & Networking ========== #
+  BITVPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 192.5.0.0/16
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+        - Key: Name
+          Value: BIT-VPC
+
+  BITInternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: BIT-InternetGateway
+
+  BITGatewayAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref BITVPC
+      InternetGatewayId: !Ref BITInternetGateway
+
+  # --- Subredes Públicas ---
+  BITPublicSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref BITVPC
+      CidrBlock: 192.5.1.0/24
+      AvailabilityZone: !Select [0, !GetAZs '']
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: BIT-PublicSubnet1
+
+  BITPublicSubnet2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref BITVPC
+      CidrBlock: 192.5.4.0/24
+      AvailabilityZone: !Select [1, !GetAZs '']
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: BIT-PublicSubnet2
+
+  BITPublicSubnet3:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref BITVPC
+      CidrBlock: 192.5.3.0/24
+      AvailabilityZone: !Select [2, !GetAZs '']
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: BIT-PublicSubnet3
+
+  # --- Subredes Privadas ---
+  BITPrivateSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref BITVPC
+      CidrBlock: 192.5.2.0/24
+      AvailabilityZone: !Select [0, !GetAZs '']
+      Tags:
+        - Key: Name
+          Value: BIT-PrivateSubnet1
+
+  BITPrivateSubnet2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref BITVPC
+      CidrBlock: 192.5.5.0/24
+      AvailabilityZone: !Select [1, !GetAZs '']
+      Tags:
+        - Key: Name
+          Value: BIT-PrivateSubnet2
+
+  BITPrivateSubnet3:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref BITVPC
+      CidrBlock: 192.5.6.0/24
+      AvailabilityZone: !Select [2, !GetAZs '']
+      Tags:
+        - Key: Name
+          Value: BIT-PrivateSubnet3
+
+  # --- NAT Gateway ---
+  BITNATEIP:
+    Type: AWS::EC2::EIP
+    DependsOn: BITGatewayAttachment
+    Properties:
+      Domain: vpc
+
+  BITNATGateway:
+    Type: AWS::EC2::NatGateway
+    Properties:
+      AllocationId: !GetAtt BITNATEIP.AllocationId
+      SubnetId: !Ref BITPublicSubnet1 # El NAT vive en una subred pública
+      Tags:
+        - Key: Name
+          Value: BIT-NATGateway
+
+  # --- Tablas de Rutas ---
+  BITPublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref BITVPC
+      Tags:
+        - Key: Name
+          Value: BIT-PublicRouteTable
+
+  BITPublicRoute:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref BITPublicRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref BITInternetGateway
+
+  BITPrivateRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref BITVPC
+      Tags:
+        - Key: Name
+          Value: BIT-PrivateRouteTable
+
+  BITPrivateRoute: # Esta es la regla que dirige el tráfico privado al NAT
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref BITPrivateRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref BITNATGateway
+
+  # --- Asociaciones de Rutas Públicas ---
+  AssocPublic1:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties: { SubnetId: !Ref BITPublicSubnet1, RouteTableId: !Ref BITPublicRouteTable }
+  AssocPublic2:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties: { SubnetId: !Ref BITPublicSubnet2, RouteTableId: !Ref BITPublicRouteTable }
+  AssocPublic3:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties: { SubnetId: !Ref BITPublicSubnet3, RouteTableId: !Ref BITPublicRouteTable }
+
+  # --- Asociaciones de Rutas Privadas (Aquí se enlazan al NAT) ---
+  AssocPrivate1:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties: { SubnetId: !Ref BITPrivateSubnet1, RouteTableId: !Ref BITPrivateRouteTable }
+  AssocPrivate2:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties: { SubnetId: !Ref BITPrivateSubnet2, RouteTableId: !Ref BITPrivateRouteTable }
+  AssocPrivate3:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties: { SubnetId: !Ref BITPrivateSubnet3, RouteTableId: !Ref BITPrivateRouteTable }
+
+  # ========== Security Groups ========== #
+  BITPublicSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: "Acceso Publico"
+      VpcId: !Ref BITVPC
+      SecurityGroupIngress:
+        - { IpProtocol: tcp, FromPort: 22, ToPort: 22, CidrIp: 0.0.0.0/0 }
+        - { IpProtocol: tcp, FromPort: 80, ToPort: 80, CidrIp: 0.0.0.0/0 }
+        - { IpProtocol: tcp, FromPort: 443, ToPort: 443, CidrIp: 0.0.0.0/0 }
+
+  BITPrivateSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: "Acceso Privado"
+      VpcId: !Ref BITVPC
+      SecurityGroupIngress:
+        - { IpProtocol: tcp, FromPort: 22, ToPort: 22, CidrIp: 0.0.0.0/0 }
+        - { IpProtocol: tcp, FromPort: 3389, ToPort: 3389, CidrIp: 0.0.0.0/0 }
+
+  # ========== INSTANCIAS ========== #
+  UbuntuServerBIT:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: !Ref UbuntuAMI
+      InstanceType: t3.micro
+      KeyName: !Ref KeyName
+      NetworkInterfaces:
+        - DeviceIndex: 0
+          SubnetId: !Ref BITPublicSubnet1
+          GroupSet: [!Ref BITPublicSecurityGroup]
+          AssociatePublicIpAddress: true
+      Tags:
+        - Key: Name
+          Value: Bastion-Ubuntu
+
+  WindowsServerBIT:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: !Ref WindowsAMI
+      InstanceType: t3.medium
+      KeyName: !Ref KeyName
+      NetworkInterfaces:
+        - DeviceIndex: 0
+          SubnetId: !Ref BITPrivateSubnet3
+          GroupSet: [!Ref BITPrivateSecurityGroup]
+      Tags:
+        - Key: Name
+          Value: WS-2025-BIT
