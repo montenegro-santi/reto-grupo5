@@ -446,20 +446,6 @@ Resources:
         - Key: Name
           Value: BIT-S3-Bucket
 
-  BITS3BucketPolicy:
-    Type: AWS::S3::BucketPolicy
-    Properties:
-      Bucket: !Ref BITS3Bucket
-      PolicyDocument:
-        Version: '2012-10-17'
-        Statement:
-          - Sid: PublicReadGetObject
-            Effect: Allow
-            Principal: '*'
-            Action:
-              - s3:GetObject
-            Resource: !Sub ${BITS3Bucket.Arn}/*
-
 Outputs:
   VPCId:
     Description: ID de la VPC principal del proyecto
