@@ -1,5 +1,6 @@
 AWSTemplateFormatVersion: '2010-09-09'
-Description: VPC con 3 Subredes Públicas (Ubuntu/Windows) y 3 Privadas conectadas a NAT Gateway - BIT + RDS MySQL Free Tier + Secrets Manager + S3
+Description: VPC con 3 Subredes Públicas (Ubuntu/Windows) y 3 Privadas
+  conectadas a NAT Gateway - BIT + RDS MySQL Free Tier + Secrets Manager + S3
 
 Parameters:
   KeyName:
@@ -7,10 +8,10 @@ Parameters:
     Description: Nombre del KeyPair para acceso SSH/RDP
     Default: vockey
   UbuntuAMI:
-    Type: 'AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>'
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
     Default: /aws/service/canonical/ubuntu/server/24.04/stable/current/amd64/hvm/ebs-gp3/ami-id
   WindowsAMI:
-    Type: 'AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>'
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
     Default: /aws/service/ami-windows-latest/Windows_Server-2025-English-Full-Base
 
 Resources:
@@ -44,7 +45,9 @@ Resources:
     Properties:
       VpcId: !Ref BITVPC
       CidrBlock: 192.5.1.0/24
-      AvailabilityZone: !Select [0, !GetAZs '']
+      AvailabilityZone: !Select
+        - 0
+        - !GetAZs ''
       MapPublicIpOnLaunch: true
       Tags:
         - Key: Name
@@ -55,7 +58,9 @@ Resources:
     Properties:
       VpcId: !Ref BITVPC
       CidrBlock: 192.5.4.0/24
-      AvailabilityZone: !Select [1, !GetAZs '']
+      AvailabilityZone: !Select
+        - 1
+        - !GetAZs ''
       MapPublicIpOnLaunch: true
       Tags:
         - Key: Name
@@ -66,7 +71,9 @@ Resources:
     Properties:
       VpcId: !Ref BITVPC
       CidrBlock: 192.5.3.0/24
-      AvailabilityZone: !Select [2, !GetAZs '']
+      AvailabilityZone: !Select
+        - 2
+        - !GetAZs ''
       MapPublicIpOnLaunch: true
       Tags:
         - Key: Name
@@ -78,7 +85,9 @@ Resources:
     Properties:
       VpcId: !Ref BITVPC
       CidrBlock: 192.5.2.0/24
-      AvailabilityZone: !Select [0, !GetAZs '']
+      AvailabilityZone: !Select
+        - 0
+        - !GetAZs ''
       Tags:
         - Key: Name
           Value: BIT-PrivateSubnet1
@@ -88,7 +97,9 @@ Resources:
     Properties:
       VpcId: !Ref BITVPC
       CidrBlock: 192.5.5.0/24
-      AvailabilityZone: !Select [1, !GetAZs '']
+      AvailabilityZone: !Select
+        - 1
+        - !GetAZs ''
       Tags:
         - Key: Name
           Value: BIT-PrivateSubnet2
@@ -98,7 +109,9 @@ Resources:
     Properties:
       VpcId: !Ref BITVPC
       CidrBlock: 192.5.6.0/24
-      AvailabilityZone: !Select [2, !GetAZs '']
+      AvailabilityZone: !Select
+        - 2
+        - !GetAZs ''
       Tags:
         - Key: Name
           Value: BIT-PrivateSubnet3
@@ -263,10 +276,11 @@ Resources:
       NetworkInterfaces:
         - DeviceIndex: 0
           SubnetId: !Ref BITPublicSubnet1
-          GroupSet: [!Ref BITUbuntuSecurityGroup]
+          GroupSet:
+            - !Ref BITUbuntuSecurityGroup
           AssociatePublicIpAddress: true
-      UserData:
-        Fn::Base64: !Sub |
+      UserData: !Base64
+        Fn::Sub: |
           #!/bin/bash
           set -e
 
@@ -371,7 +385,8 @@ Resources:
       NetworkInterfaces:
         - DeviceIndex: 0
           SubnetId: !Ref BITPublicSubnet3
-          GroupSet: [!Ref BITWindowsSecurityGroup]
+          GroupSet:
+            - !Ref BITWindowsSecurityGroup
           AssociatePublicIpAddress: true
       Tags:
         - Key: Name
@@ -395,7 +410,7 @@ Resources:
       DBInstanceIdentifier: bit-rds-mysql
       DBInstanceClass: db.t3.micro
       Engine: mysql
-      EngineVersion: '8.0.40'
+      EngineVersion: 8.0.40
       MasterUsername: admin
       ManageMasterUserPassword: true
       AllocatedStorage: 20
@@ -415,7 +430,7 @@ Resources:
   BITS3Bucket:
     Type: AWS::S3::Bucket
     Properties:
-      BucketName: !Sub 'bit-reto-bucket-${AWS::AccountId}-${AWS::Region}'
+      BucketName: !Sub bit-reto-bucket-${AWS::AccountId}-${AWS::Region}
       PublicAccessBlockConfiguration:
         BlockPublicAcls: true
         BlockPublicPolicy: true
@@ -436,21 +451,21 @@ Resources:
     Properties:
       Bucket: !Ref BITS3Bucket
       PolicyDocument:
-      Version: '2012-10-17'
-      Statement:
-        - Sid: PublicReadGetObject
-          Effect: Allow
-          Principal: '*'
-          Action: 
-            - s3:GetObject
-          Resource: !Sub '${BITS3Bucket.Arn}/*'
+        Version: '2012-10-17'
+        Statement:
+          - Sid: PublicReadGetObject
+            Effect: Allow
+            Principal: '*'
+            Action:
+              - s3:GetObject
+            Resource: !Sub ${BITS3Bucket.Arn}/*
 
 Outputs:
   VPCId:
     Description: ID de la VPC principal del proyecto
     Value: !Ref BITVPC
     Export:
-      Name: !Sub '${AWS::StackName}-VPCID'
+      Name: !Sub ${AWS::StackName}-VPCID
 
   UbuntuPublicIP:
     Description: Direccion IP publica del servidor Ubuntu Bastion con Nginx
@@ -482,11 +497,11 @@ Outputs:
 
   WordPressURL:
     Description: URL para acceder e instalar WordPress
-    Value: !Sub 'http://${UbuntuServerBIT.PublicIp}'
+    Value: !Sub http://${UbuntuServerBIT.PublicIp}
 
   WordPressTestURL:
     Description: URL de la pagina de prueba
-    Value: !Sub 'http://${UbuntuServerBIT.PublicIp}/test.html'
+    Value: !Sub http://${UbuntuServerBIT.PublicIp}/test.html
 
   UbuntuInstanceId:
     Description: Instance ID del servidor Ubuntu
