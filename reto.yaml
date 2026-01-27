@@ -1,18 +1,16 @@
 AWSTemplateFormatVersion: '2010-09-09'
-Description: VPC con 3 Subredes Públicas (Ubuntu/Windows) y 3 Privadas conectadas a NAT Gateway - BIT
+Description: VPC con 3 Subredes Públicas (Ubuntu/Windows) y 3 Privadas conectadas a NAT Gateway - BIT + RDS MySQL Free Tier + Secrets Manager + S3
 
 Parameters:
   KeyName:
     Type: AWS::EC2::KeyPair::KeyName
     Description: Nombre del KeyPair para acceso SSH/RDP
     Default: vockey
-
   UbuntuAMI:
-    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
-    Default: /aws/service/canonical/ubuntu/server/22.04/stable/current/amd64/hvm/ebs-gp2/ami-id
-
+    Type: 'AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>'
+    Default: /aws/service/canonical/ubuntu/server/24.04/stable/current/amd64/hvm/ebs-gp3/ami-id
   WindowsAMI:
-    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Type: 'AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>'
     Default: /aws/service/ami-windows-latest/Windows_Server-2025-English-Full-Base
 
 Resources:
@@ -116,7 +114,7 @@ Resources:
     Type: AWS::EC2::NatGateway
     Properties:
       AllocationId: !GetAtt BITNATEIP.AllocationId
-      SubnetId: !Ref BITPublicSubnet1 # El NAT vive en una subred pública
+      SubnetId: !Ref BITPublicSubnet1
       Tags:
         - Key: Name
           Value: BIT-NATGateway
@@ -145,7 +143,7 @@ Resources:
         - Key: Name
           Value: BIT-PrivateRouteTable
 
-  BITPrivateRoute: # Esta es la regla que dirige el tráfico privado al NAT
+  BITPrivateRoute:
     Type: AWS::EC2::Route
     Properties:
       RouteTableId: !Ref BITPrivateRouteTable
@@ -155,44 +153,105 @@ Resources:
   # --- Asociaciones de Rutas Públicas ---
   AssocPublic1:
     Type: AWS::EC2::SubnetRouteTableAssociation
-    Properties: { SubnetId: !Ref BITPublicSubnet1, RouteTableId: !Ref BITPublicRouteTable }
+    Properties:
+      SubnetId: !Ref BITPublicSubnet1
+      RouteTableId: !Ref BITPublicRouteTable
+
   AssocPublic2:
     Type: AWS::EC2::SubnetRouteTableAssociation
-    Properties: { SubnetId: !Ref BITPublicSubnet2, RouteTableId: !Ref BITPublicRouteTable }
+    Properties:
+      SubnetId: !Ref BITPublicSubnet2
+      RouteTableId: !Ref BITPublicRouteTable
+
   AssocPublic3:
     Type: AWS::EC2::SubnetRouteTableAssociation
-    Properties: { SubnetId: !Ref BITPublicSubnet3, RouteTableId: !Ref BITPublicRouteTable }
+    Properties:
+      SubnetId: !Ref BITPublicSubnet3
+      RouteTableId: !Ref BITPublicRouteTable
 
-  # --- Asociaciones de Rutas Privadas (Aquí se enlazan al NAT) ---
+  # --- Asociaciones de Rutas Privadas ---
   AssocPrivate1:
     Type: AWS::EC2::SubnetRouteTableAssociation
-    Properties: { SubnetId: !Ref BITPrivateSubnet1, RouteTableId: !Ref BITPrivateRouteTable }
+    Properties:
+      SubnetId: !Ref BITPrivateSubnet1
+      RouteTableId: !Ref BITPrivateRouteTable
+
   AssocPrivate2:
     Type: AWS::EC2::SubnetRouteTableAssociation
-    Properties: { SubnetId: !Ref BITPrivateSubnet2, RouteTableId: !Ref BITPrivateRouteTable }
+    Properties:
+      SubnetId: !Ref BITPrivateSubnet2
+      RouteTableId: !Ref BITPrivateRouteTable
+
   AssocPrivate3:
     Type: AWS::EC2::SubnetRouteTableAssociation
-    Properties: { SubnetId: !Ref BITPrivateSubnet3, RouteTableId: !Ref BITPrivateRouteTable }
+    Properties:
+      SubnetId: !Ref BITPrivateSubnet3
+      RouteTableId: !Ref BITPrivateRouteTable
 
   # ========== Security Groups ========== #
-  BITPublicSecurityGroup:
+  BITUbuntuSecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
-      GroupDescription: "Acceso Publico"
+      GroupDescription: Acceso HTTP/HTTPS y SSH para servidor Ubuntu con Nginx
       VpcId: !Ref BITVPC
       SecurityGroupIngress:
-        - { IpProtocol: tcp, FromPort: 22, ToPort: 22, CidrIp: 0.0.0.0/0 }
-        - { IpProtocol: tcp, FromPort: 80, ToPort: 80, CidrIp: 0.0.0.0/0 }
-        - { IpProtocol: tcp, FromPort: 443, ToPort: 443, CidrIp: 0.0.0.0/0 }
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+      SecurityGroupEgress:
+        - IpProtocol: -1
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Name
+          Value: BIT-UbuntuSecurityGroup
 
-  BITPrivateSecurityGroup:
+  BITWindowsSecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
-      GroupDescription: "Acceso Privado"
+      GroupDescription: Acceso RDP y SSH para servidor Windows
       VpcId: !Ref BITVPC
       SecurityGroupIngress:
-        - { IpProtocol: tcp, FromPort: 22, ToPort: 22, CidrIp: 0.0.0.0/0 }
-        - { IpProtocol: tcp, FromPort: 3389, ToPort: 3389, CidrIp: 0.0.0.0/0 }
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 3389
+          ToPort: 3389
+          CidrIp: 0.0.0.0/0
+      SecurityGroupEgress:
+        - IpProtocol: -1
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Name
+          Value: BIT-WindowsSecurityGroup
+
+  BITRDSSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Acceso MySQL exclusivamente por puerto 3306
+      VpcId: !Ref BITVPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 3306
+          ToPort: 3306
+          SourceSecurityGroupId: !Ref BITUbuntuSecurityGroup
+        - IpProtocol: tcp
+          FromPort: 3306
+          ToPort: 3306
+          SourceSecurityGroupId: !Ref BITWindowsSecurityGroup
+      Tags:
+        - Key: Name
+          Value: BIT-RDSSecurityGroup
 
   # ========== INSTANCIAS ========== #
   UbuntuServerBIT:
@@ -204,8 +263,101 @@ Resources:
       NetworkInterfaces:
         - DeviceIndex: 0
           SubnetId: !Ref BITPublicSubnet1
-          GroupSet: [!Ref BITPublicSecurityGroup]
+          GroupSet: [!Ref BITUbuntuSecurityGroup]
           AssociatePublicIpAddress: true
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash
+          set -e
+
+          # Actualizar sistema
+          apt update -y
+          apt upgrade -y
+
+          # Instalar Nginx, PHP-FPM y extensiones necesarias
+          apt install -y nginx mysql-client git tree net-tools php-fpm php-mysql php-cli php-common php-gd php-curl php-mbstring php-xml php-zip php-soap php-intl php-bcmath
+
+          # Crear directorio para WordPress
+          mkdir -p /var/www/html/wordpress
+          cd /var/www/html/wordpress
+
+          # Descargar y extraer WordPress
+          wget https://wordpress.org/latest.tar.gz
+          tar xzvf latest.tar.gz --strip-components=1
+          rm latest.tar.gz
+
+          # Configurar permisos
+          chown -R www-data:www-data /var/www/html/wordpress
+          find /var/www/html/wordpress -type d -exec chmod 755 {} \;
+          find /var/www/html/wordpress -type f -exec chmod 644 {} \;
+
+          # Configurar Nginx server block para WordPress
+          cat > /etc/nginx/sites-available/wordpress << 'EOFNGINX'
+          server {
+              listen 80 default_server;
+              listen [::]:80 default_server;
+
+              root /var/www/html/wordpress;
+              index index.php index.html index.htm;
+
+              server_name _;
+
+              client_max_body_size 100M;
+
+              location / {
+                  try_files $uri $uri/ /index.php?$args;
+              }
+
+              location ~ \.php$ {
+                  include snippets/fastcgi-php.conf;
+                  fastcgi_pass unix:/run/php/php-fpm.sock;
+                  fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;
+                  include fastcgi_params;
+              }
+
+              location ~ /\.ht {
+                  deny all;
+              }
+
+              location = /favicon.ico {
+                  log_not_found off;
+                  access_log off;
+              }
+
+              location = /robots.txt {
+                  allow all;
+                  log_not_found off;
+                  access_log off;
+              }
+
+              location ~* \.(css|gif|ico|jpeg|jpg|js|png)$ {
+                  expires max;
+                  log_not_found off;
+              }
+          }
+          EOFNGINX
+
+          # Deshabilitar sitio por defecto y habilitar WordPress
+          rm -f /etc/nginx/sites-enabled/default
+          ln -sf /etc/nginx/sites-available/wordpress /etc/nginx/sites-enabled/
+
+          # Verificar configuración de Nginx
+          nginx -t
+
+          # Reiniciar servicios (Ubuntu 24.04 usa PHP 8.1 por defecto)
+          systemctl restart php8.3-fpm
+          systemctl restart nginx
+
+          # Habilitar servicios en el arranque
+          systemctl enable nginx
+          systemctl enable php8.3-fpm
+
+          # Crear página de prueba
+          echo "<html><body><h1>WordPress instalado correctamente</h1><p>Servidor: Ubuntu 24.04 + Nginx + PHP 8.1</p></body></html>" > /var/www/html/wordpress/test.html
+
+          # Configuración de variables de entorno
+          export TERM=xterm
+          export SHELL=/bin/bash
       Tags:
         - Key: Name
           Value: Bastion-Ubuntu
@@ -218,8 +370,128 @@ Resources:
       KeyName: !Ref KeyName
       NetworkInterfaces:
         - DeviceIndex: 0
-          SubnetId: !Ref BITPrivateSubnet3
-          GroupSet: [!Ref BITPrivateSecurityGroup]
+          SubnetId: !Ref BITPublicSubnet3
+          GroupSet: [!Ref BITWindowsSecurityGroup]
+          AssociatePublicIpAddress: true
       Tags:
         - Key: Name
-          Value: WS-2025-BIT
+          Value: WS-2025
+
+  # ========== RDS MySQL Free Tier con Secrets Manager ========== #
+  BITDBSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupDescription: Grupo de subredes privadas para RDS MySQL
+      SubnetIds:
+        - !Ref BITPrivateSubnet1
+        - !Ref BITPrivateSubnet2
+      Tags:
+        - Key: Name
+          Value: BIT-DBSubnetGroup
+
+  BITRDSInstance:
+    Type: AWS::RDS::DBInstance
+    Properties:
+      DBInstanceIdentifier: bit-rds-mysql
+      DBInstanceClass: db.t3.micro
+      Engine: mysql
+      EngineVersion: '8.0.40'
+      MasterUsername: admin
+      ManageMasterUserPassword: true
+      AllocatedStorage: 20
+      StorageType: gp2
+      DBSubnetGroupName: !Ref BITDBSubnetGroup
+      VPCSecurityGroups:
+        - !Ref BITRDSSecurityGroup
+      MultiAZ: false
+      PubliclyAccessible: false
+      BackupRetentionPeriod: 7
+      DeletionProtection: false
+      Tags:
+        - Key: Name
+          Value: BIT-RDS-MySQL-FreeTier
+
+  # ========== S3 Bucket Privado ========== #
+  BITS3Bucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub 'bit-reto-bucket-${AWS::AccountId}-${AWS::Region}'
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      VersioningConfiguration:
+        Status: Enabled
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      Tags:
+        - Key: Name
+          Value: BIT-S3-Bucket
+
+  BITS3BucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref BITS3Bucket
+      PolicyDocument:
+      Version: '2012-10-17'
+      Statement:
+        - Sid: PublicReadGetObject
+          Effect: Allow
+          Principal: '*'
+          Action: 
+            - s3:GetObject
+          Resource: !Sub '${BITS3Bucket.Arn}/*'
+
+Outputs:
+  VPCId:
+    Description: ID de la VPC principal del proyecto
+    Value: !Ref BITVPC
+    Export:
+      Name: !Sub '${AWS::StackName}-VPCID'
+
+  UbuntuPublicIP:
+    Description: Direccion IP publica del servidor Ubuntu Bastion con Nginx
+    Value: !GetAtt UbuntuServerBIT.PublicIp
+
+  WindowsPublicIP:
+    Description: Direccion IP publica del servidor Windows Server 2025
+    Value: !GetAtt WindowsServerBIT.PublicIp
+
+  RDSEndpoint:
+    Description: Endpoint de conexion para RDS MySQL desde instancias EC2
+    Value: !GetAtt BITRDSInstance.Endpoint.Address
+
+  RDSPort:
+    Description: Puerto de conexion para RDS MySQL
+    Value: !GetAtt BITRDSInstance.Endpoint.Port
+
+  RDSSecretArn:
+    Description: ARN del secreto con credenciales de acceso a RDS MySQL
+    Value: !GetAtt BITRDSInstance.MasterUserSecret.SecretArn
+
+  S3BucketName:
+    Description: Nombre del bucket S3 privado para almacenamiento
+    Value: !Ref BITS3Bucket
+
+  S3BucketArn:
+    Description: ARN del bucket S3 privado
+    Value: !GetAtt BITS3Bucket.Arn
+
+  WordPressURL:
+    Description: URL para acceder e instalar WordPress
+    Value: !Sub 'http://${UbuntuServerBIT.PublicIp}'
+
+  WordPressTestURL:
+    Description: URL de la pagina de prueba
+    Value: !Sub 'http://${UbuntuServerBIT.PublicIp}/test.html'
+
+  UbuntuInstanceId:
+    Description: Instance ID del servidor Ubuntu
+    Value: !Ref UbuntuServerBIT
+
+  WindowsInstanceId:
+    Description: Instance ID del servidor Windows
+    Value: !Ref WindowsServerBIT
