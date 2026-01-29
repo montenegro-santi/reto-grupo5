@@ -378,7 +378,7 @@ Resources:
           WP_ADMIN_USER="admin"
           WP_ADMIN_PASSWORD="Grupo5RetoAgl"
           WP_ADMIN_EMAIL="admin@example.com"
-          WP_SITE_TITLE="WordPress BIT con EFS y RDS"
+          WP_SITE_TITLE="WordPress BIT"
 
           # Obtener IP publica
           PUBLIC_IP=$(curl -s http://169.254.169.254/latest/meta-data/public-ipv4)
