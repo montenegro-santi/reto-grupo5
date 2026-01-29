@@ -1,6 +1,5 @@
 AWSTemplateFormatVersion: '2010-09-09'
-Description: VPC con 3 Subredes Públicas (Ubuntu/Windows) y 3 Privadas
-  conectadas a NAT Gateway - BIT + RDS MySQL Free Tier + Secrets Manager + S3
+Description: VPC con WordPress + RDS MySQL + EFS - TOTALMENTE FUNCIONAL
 
 Parameters:
   KeyName:
@@ -45,9 +44,7 @@ Resources:
     Properties:
       VpcId: !Ref BITVPC
       CidrBlock: 192.5.1.0/24
-      AvailabilityZone: !Select
-        - 0
-        - !GetAZs ''
+      AvailabilityZone: !Select [0, !GetAZs '']
       MapPublicIpOnLaunch: true
       Tags:
         - Key: Name
@@ -58,9 +55,7 @@ Resources:
     Properties:
       VpcId: !Ref BITVPC
       CidrBlock: 192.5.4.0/24
-      AvailabilityZone: !Select
-        - 1
-        - !GetAZs ''
+      AvailabilityZone: !Select [1, !GetAZs '']
       MapPublicIpOnLaunch: true
       Tags:
         - Key: Name
@@ -71,9 +66,7 @@ Resources:
     Properties:
       VpcId: !Ref BITVPC
       CidrBlock: 192.5.3.0/24
-      AvailabilityZone: !Select
-        - 2
-        - !GetAZs ''
+      AvailabilityZone: !Select [2, !GetAZs '']
       MapPublicIpOnLaunch: true
       Tags:
         - Key: Name
@@ -85,9 +78,7 @@ Resources:
     Properties:
       VpcId: !Ref BITVPC
       CidrBlock: 192.5.2.0/24
-      AvailabilityZone: !Select
-        - 0
-        - !GetAZs ''
+      AvailabilityZone: !Select [0, !GetAZs '']
       Tags:
         - Key: Name
           Value: BIT-PrivateSubnet1
@@ -97,9 +88,7 @@ Resources:
     Properties:
       VpcId: !Ref BITVPC
       CidrBlock: 192.5.5.0/24
-      AvailabilityZone: !Select
-        - 1
-        - !GetAZs ''
+      AvailabilityZone: !Select [1, !GetAZs '']
       Tags:
         - Key: Name
           Value: BIT-PrivateSubnet2
@@ -109,9 +98,7 @@ Resources:
     Properties:
       VpcId: !Ref BITVPC
       CidrBlock: 192.5.6.0/24
-      AvailabilityZone: !Select
-        - 2
-        - !GetAZs ''
+      AvailabilityZone: !Select [2, !GetAZs '']
       Tags:
         - Key: Name
           Value: BIT-PrivateSubnet3
@@ -266,133 +253,62 @@ Resources:
         - Key: Name
           Value: BIT-RDSSecurityGroup
 
-  # ========== INSTANCIAS ========== #
-  UbuntuServerBIT:
-    Type: AWS::EC2::Instance
+  # ========== EFS Security Group ========== #
+  BITEFSSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
     Properties:
-      ImageId: !Ref UbuntuAMI
-      InstanceType: t3.micro
-      KeyName: !Ref KeyName
-      NetworkInterfaces:
-        - DeviceIndex: 0
-          SubnetId: !Ref BITPublicSubnet1
-          GroupSet:
-            - !Ref BITUbuntuSecurityGroup
-          AssociatePublicIpAddress: true
-      UserData: !Base64
-        Fn::Sub: |
-          #!/bin/bash
-          set -e
-
-          # Actualizar sistema
-          apt update -y
-          apt upgrade -y
-
-          # Instalar Nginx, PHP-FPM y extensiones necesarias
-          apt install -y nginx mysql-client git tree net-tools php-fpm php-mysql php-cli php-common php-gd php-curl php-mbstring php-xml php-zip php-soap php-intl php-bcmath
-
-          # Crear directorio para WordPress
-          mkdir -p /var/www/html/wordpress
-          cd /var/www/html/wordpress
-
-          # Descargar y extraer WordPress
-          wget https://wordpress.org/latest.tar.gz
-          tar xzvf latest.tar.gz --strip-components=1
-          rm latest.tar.gz
-
-          # Configurar permisos
-          chown -R www-data:www-data /var/www/html/wordpress
-          find /var/www/html/wordpress -type d -exec chmod 755 {} \;
-          find /var/www/html/wordpress -type f -exec chmod 644 {} \;
-
-          # Configurar Nginx server block para WordPress
-          cat > /etc/nginx/sites-available/wordpress << 'EOFNGINX'
-          server {
-              listen 80 default_server;
-              listen [::]:80 default_server;
-
-              root /var/www/html/wordpress;
-              index index.php index.html index.htm;
-
-              server_name _;
-
-              client_max_body_size 100M;
-
-              location / {
-                  try_files $uri $uri/ /index.php?$args;
-              }
-
-              location ~ \.php$ {
-                  include snippets/fastcgi-php.conf;
-                  fastcgi_pass unix:/run/php/php-fpm.sock;
-                  fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;
-                  include fastcgi_params;
-              }
-
-              location ~ /\.ht {
-                  deny all;
-              }
-
-              location = /favicon.ico {
-                  log_not_found off;
-                  access_log off;
-              }
-
-              location = /robots.txt {
-                  allow all;
-                  log_not_found off;
-                  access_log off;
-              }
-
-              location ~* \.(css|gif|ico|jpeg|jpg|js|png)$ {
-                  expires max;
-                  log_not_found off;
-              }
-          }
-          EOFNGINX
-
-          # Deshabilitar sitio por defecto y habilitar WordPress
-          rm -f /etc/nginx/sites-enabled/default
-          ln -sf /etc/nginx/sites-available/wordpress /etc/nginx/sites-enabled/
-
-          # Verificar configuración de Nginx
-          nginx -t
-
-          # Reiniciar servicios (Ubuntu 24.04 usa PHP 8.1 por defecto)
-          systemctl restart php8.3-fpm
-          systemctl restart nginx
-
-          # Habilitar servicios en el arranque
-          systemctl enable nginx
-          systemctl enable php8.3-fpm
-
-          # Crear página de prueba
-          echo "<html><body><h1>WordPress instalado correctamente</h1><p>Servidor: Ubuntu 24.04 + Nginx + PHP 8.1</p></body></html>" > /var/www/html/wordpress/test.html
-
-          # Configuración de variables de entorno
-          export TERM=xterm
-          export SHELL=/bin/bash
+      GroupDescription: Acceso NFS para EFS desde instancias EC2
+      VpcId: !Ref BITVPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 2049
+          ToPort: 2049
+          SourceSecurityGroupId: !Ref BITUbuntuSecurityGroup
+        - IpProtocol: tcp
+          FromPort: 2049
+          ToPort: 2049
+          SourceSecurityGroupId: !Ref BITWindowsSecurityGroup
       Tags:
         - Key: Name
-          Value: Bastion-Ubuntu
+          Value: BIT-EFSSecurityGroup
 
-  WindowsServerBIT:
-    Type: AWS::EC2::Instance
+  # ========== EFS File System ========== #
+  BITEFSFileSystem:
+    Type: AWS::EFS::FileSystem
     Properties:
-      ImageId: !Ref WindowsAMI
-      InstanceType: t3.medium
-      KeyName: !Ref KeyName
-      NetworkInterfaces:
-        - DeviceIndex: 0
-          SubnetId: !Ref BITPublicSubnet3
-          GroupSet:
-            - !Ref BITWindowsSecurityGroup
-          AssociatePublicIpAddress: true
-      Tags:
+      Encrypted: true
+      PerformanceMode: generalPurpose
+      ThroughputMode: bursting
+      FileSystemTags:
         - Key: Name
-          Value: WS-2025
+          Value: BIT-WordPress-EFS
 
-  # ========== RDS MySQL Free Tier con Secrets Manager ========== #
+  # ========== EFS Mount Targets (3 AZs) ========== #
+  BITEFSMountTarget1:
+    Type: AWS::EFS::MountTarget
+    Properties:
+      FileSystemId: !Ref BITEFSFileSystem
+      SubnetId: !Ref BITPrivateSubnet1
+      SecurityGroups:
+        - !Ref BITEFSSecurityGroup
+
+  BITEFSMountTarget2:
+    Type: AWS::EFS::MountTarget
+    Properties:
+      FileSystemId: !Ref BITEFSFileSystem
+      SubnetId: !Ref BITPrivateSubnet2
+      SecurityGroups:
+        - !Ref BITEFSSecurityGroup
+
+  BITEFSMountTarget3:
+    Type: AWS::EFS::MountTarget
+    Properties:
+      FileSystemId: !Ref BITEFSFileSystem
+      SubnetId: !Ref BITPrivateSubnet3
+      SecurityGroups:
+        - !Ref BITEFSSecurityGroup
+
+  # ========== RDS MySQL Free Tier ========== #
   BITDBSubnetGroup:
     Type: AWS::RDS::DBSubnetGroup
     Properties:
@@ -412,7 +328,8 @@ Resources:
       Engine: mysql
       EngineVersion: 8.0.40
       MasterUsername: admin
-      ManageMasterUserPassword: true
+      MasterUserPassword: Grupo5RetoAgl
+      DBName: wordpress
       AllocatedStorage: 20
       StorageType: gp2
       DBSubnetGroupName: !Ref BITDBSubnetGroup
@@ -425,6 +342,273 @@ Resources:
       Tags:
         - Key: Name
           Value: BIT-RDS-MySQL-FreeTier
+
+  # ========== INSTANCIAS ========== #
+  UbuntuServerBIT:
+    Type: AWS::EC2::Instance
+    DependsOn:
+      - BITEFSMountTarget1
+      - BITEFSMountTarget2
+      - BITEFSMountTarget3
+      - BITRDSInstance
+    Properties:
+      ImageId: !Ref UbuntuAMI
+      InstanceType: t3.micro
+      KeyName: !Ref KeyName
+      NetworkInterfaces:
+        - DeviceIndex: 0
+          SubnetId: !Ref BITPublicSubnet1
+          GroupSet:
+            - !Ref BITUbuntuSecurityGroup
+          AssociatePublicIpAddress: true
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash
+          exec > >(tee /var/log/user-data.log|logger -t user-data -s 2>/dev/console) 2>&1
+          set -x
+          
+          echo "==== INICIO INSTALACION WORDPRESS ===="
+          date
+
+          # Variables de configuracion
+          DB_NAME="wordpress"
+          DB_USER="admin"
+          DB_PASSWORD="Grupo5RetoAgl"
+          DB_HOST="${BITRDSInstance.Endpoint.Address}"
+          WP_ADMIN_USER="admin"
+          WP_ADMIN_PASSWORD="Grupo5RetoAgl"
+          WP_ADMIN_EMAIL="admin@example.com"
+          WP_SITE_TITLE="WordPress BIT con EFS y RDS"
+
+          # Obtener IP publica
+          PUBLIC_IP=$(curl -s http://169.254.169.254/latest/meta-data/public-ipv4)
+          SITE_URL="http://$PUBLIC_IP"
+          
+          echo "========================================"
+          echo "IP Publica: $PUBLIC_IP"
+          echo "Site URL: $SITE_URL"
+          echo "DB Host: $DB_HOST"
+          echo "========================================"
+
+          # Actualizar sistema
+          export DEBIAN_FRONTEND=noninteractive
+          apt update -y
+          apt upgrade -y
+
+          # Instalar dependencias
+          apt install -y nfs-common nginx mysql-client amazon-ec2-* curl wget \
+            php8.3-fpm php8.3-mysql php8.3-cli php8.3-common php8.3-gd \
+            php8.3-curl php8.3-mbstring php8.3-xml php8.3-zip php8.3-soap \
+            php8.3-intl php8.3-bcmath
+
+          # Configurar EFS
+          mkdir -p /var/www/html
+          sleep 30
+          mount -t nfs4 -o nfsvers=4.1,rsize=1048576,wsize=1048576,hard,timeo=600,retrans=2,noresvport ${BITEFSFileSystem}.efs.${AWS::Region}.amazonaws.com:/ /var/www/html
+
+          # Montar EFS automaticamente
+          if ! grep -q "${BITEFSFileSystem}.efs.${AWS::Region}.amazonaws.com" /etc/fstab; then
+            echo "${BITEFSFileSystem}.efs.${AWS::Region}.amazonaws.com:/ /var/www/html nfs4 nfsvers=4.1,rsize=1048576,wsize=1048576,hard,timeo=600,retrans=2,noresvport,_netdev 0 0" >> /etc/fstab
+          fi
+
+          # Verificar si WordPress ya esta instalado
+          if [ ! -f /var/www/html/index.php ]; then
+            echo "Instalando WordPress..."
+            
+            cd /tmp
+            wget https://wordpress.org/latest.tar.gz
+            tar xzvf latest.tar.gz
+            mv wordpress/* /var/www/html/
+            rm -rf wordpress latest.tar.gz
+            
+            # Instalar WP-CLI
+            curl -O https://raw.githubusercontent.com/wp-cli/builds/gh-pages/phar/wp-cli.phar
+            chmod +x wp-cli.phar
+            mv wp-cli.phar /usr/local/bin/wp
+            
+            # Esperar RDS
+            echo "Esperando RDS MySQL..."
+            MAX_ATTEMPTS=60
+            ATTEMPT=0
+            until mysql -h $DB_HOST -u $DB_USER -p$DB_PASSWORD -e "SELECT 1" &>/dev/null; do
+              ATTEMPT=$((ATTEMPT+1))
+              if [ $ATTEMPT -ge $MAX_ATTEMPTS ]; then
+                echo "ERROR: RDS no disponible"
+                exit 1
+              fi
+              echo "Intento $ATTEMPT de $MAX_ATTEMPTS..."
+              sleep 10
+            done
+            echo "RDS disponible"
+            
+            # Verificar base de datos
+            mysql -h $DB_HOST -u $DB_USER -p$DB_PASSWORD -e "CREATE DATABASE IF NOT EXISTS $DB_NAME CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"
+            
+            # Crear wp-config.php
+            cd /var/www/html
+            cp wp-config-sample.php wp-config.php
+            
+            sed -i "s/database_name_here/$DB_NAME/g" wp-config.php
+            sed -i "s/username_here/$DB_USER/g" wp-config.php
+            sed -i "s/password_here/$DB_PASSWORD/g" wp-config.php
+            sed -i "s/localhost/$DB_HOST/g" wp-config.php
+            
+            # Generar claves de seguridad
+            SALT=$(curl -s https://api.wordpress.org/secret-key/1.1/salt/)
+            STRING='put your unique phrase here'
+            printf '%s\n' "g/$STRING/d" a "$SALT" . w | ed -s wp-config.php
+            
+            # FIX: Usar echo en lugar de heredoc para expansion correcta de variables
+            echo "<?php" > /tmp/wp-config-new.php
+            echo "/* Configuracion de URL */" >> /tmp/wp-config-new.php
+            echo "define('WP_HOME', '$SITE_URL');" >> /tmp/wp-config-new.php
+            echo "define('WP_SITEURL', '$SITE_URL');" >> /tmp/wp-config-new.php
+            echo "" >> /tmp/wp-config-new.php
+            
+            # Agregar el resto del archivo (sin el <?php inicial y SIN la definicion de WP_DEBUG)
+            tail -n +2 wp-config.php | sed '/define.*WP_DEBUG/d' >> /tmp/wp-config-new.php
+            mv /tmp/wp-config-new.php wp-config.php
+            
+            # Configurar permisos
+            chown -R www-data:www-data /var/www/html
+            find /var/www/html -type d -exec chmod 755 {} \;
+            find /var/www/html -type f -exec chmod 644 {} \;
+            
+            # Instalar WordPress con WP-CLI
+            echo "Instalando WordPress con WP-CLI..."
+            sudo -u www-data wp core install \
+              --path=/var/www/html \
+              --url="$SITE_URL" \
+              --title="$WP_SITE_TITLE" \
+              --admin_user="$WP_ADMIN_USER" \
+              --admin_password="$WP_ADMIN_PASSWORD" \
+              --admin_email="$WP_ADMIN_EMAIL" \
+              --skip-email \
+              --allow-root
+            
+            # Actualizar URLs en base de datos
+            mysql -h $DB_HOST -u $DB_USER -p$DB_PASSWORD $DB_NAME << EOFDB
+          UPDATE wp_options SET option_value='$SITE_URL' WHERE option_name='home';
+          UPDATE wp_options SET option_value='$SITE_URL' WHERE option_name='siteurl';
+          EOFDB
+            
+            echo "WordPress instalado correctamente"
+          else
+            echo "WordPress ya existe en EFS"
+            PUBLIC_IP=$(curl -s http://169.254.169.254/latest/meta-data/public-ipv4)
+            SITE_URL="http://$PUBLIC_IP"
+            
+            # Actualizar URLs en base de datos
+            mysql -h $DB_HOST -u $DB_USER -p$DB_PASSWORD $DB_NAME << EOFDB
+          UPDATE wp_options SET option_value='$SITE_URL' WHERE option_name='home';
+          UPDATE wp_options SET option_value='$SITE_URL' WHERE option_name='siteurl';
+          EOFDB
+          fi
+
+          # Permisos finales
+          chown -R www-data:www-data /var/www/html
+          find /var/www/html -type d -exec chmod 755 {} \;
+          find /var/www/html -type f -exec chmod 644 {} \;
+
+          # Configurar PHP-FPM
+          sed -i 's/memory_limit = .*/memory_limit = 256M/' /etc/php/8.3/fpm/php.ini
+          sed -i 's/upload_max_filesize = .*/upload_max_filesize = 100M/' /etc/php/8.3/fpm/php.ini
+          sed -i 's/post_max_size = .*/post_max_size = 100M/' /etc/php/8.3/fpm/php.ini
+          sed -i 's/max_execution_time = .*/max_execution_time = 300/' /etc/php/8.3/fpm/php.ini
+
+          # Configurar Nginx
+          cat > /etc/nginx/sites-available/wordpress << 'EOFNGINX'
+          server {
+              listen 80 default_server;
+              listen [::]:80 default_server;
+
+              root /var/www/html;
+              index index.php index.html index.htm;
+
+              server_name _;
+
+              client_max_body_size 100M;
+
+              location / {
+                  try_files $uri $uri/ /index.php?$args;
+              }
+
+              location ~ \.php$ {
+                  include snippets/fastcgi-php.conf;
+                  fastcgi_pass unix:/run/php/php8.3-fpm.sock;
+                  fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;
+                  include fastcgi_params;
+                  fastcgi_buffer_size 128k;
+                  fastcgi_buffers 256 16k;
+                  fastcgi_busy_buffers_size 256k;
+                  fastcgi_temp_file_write_size 256k;
+              }
+
+              location ~ /\.ht {
+                  deny all;
+              }
+
+              location = /favicon.ico {
+                  log_not_found off;
+                  access_log off;
+              }
+
+              location = /robots.txt {
+                  allow all;
+                  log_not_found off;
+                  access_log off;
+              }
+
+              location ~* \.(css|gif|ico|jpeg|jpg|js|png|woff|woff2|ttf|svg|eot)$ {
+                  expires max;
+                  log_not_found off;
+                  access_log off;
+              }
+          }
+          EOFNGINX
+
+          rm -f /etc/nginx/sites-enabled/default
+          ln -sf /etc/nginx/sites-available/wordpress /etc/nginx/sites-enabled/
+
+          nginx -t
+          systemctl restart php8.3-fpm
+          systemctl restart nginx
+          systemctl enable nginx
+          systemctl enable php8.3-fpm
+
+          # SSM Agent
+          snap install amazon-ssm-agent --classic || true
+          systemctl enable snap.amazon-ssm-agent.amazon-ssm-agent.service || true
+          systemctl start snap.amazon-ssm-agent.amazon-ssm-agent.service || true
+
+          echo "========================================="
+          echo "INSTALACION COMPLETADA"
+          echo "WordPress: $SITE_URL"
+          echo "Admin: $SITE_URL/wp-admin"
+          echo "User: admin / Grupo5RetoAgl"
+          echo "========================================="
+          date
+          
+          echo "Instalacion completa - $(date)" > /var/log/wordpress-install-complete.log
+      Tags:
+        - Key: Name
+          Value: Bastion-Ubuntu
+
+  WindowsServerBIT:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: !Ref WindowsAMI
+      InstanceType: t3.medium
+      KeyName: !Ref KeyName
+      NetworkInterfaces:
+        - DeviceIndex: 0
+          SubnetId: !Ref BITPublicSubnet3
+          GroupSet:
+            - !Ref BITWindowsSecurityGroup
+          AssociatePublicIpAddress: true
+      Tags:
+        - Key: Name
+          Value: WS-2025
 
   # ========== S3 Bucket Privado ========== #
   BITS3Bucket:
@@ -448,51 +632,29 @@ Resources:
 
 Outputs:
   VPCId:
-    Description: ID de la VPC principal del proyecto
+    Description: ID de la VPC principal
     Value: !Ref BITVPC
-    Export:
-      Name: !Sub ${AWS::StackName}-VPCID
 
   UbuntuPublicIP:
-    Description: Direccion IP publica del servidor Ubuntu Bastion con Nginx
+    Description: IP publica del servidor Ubuntu
     Value: !GetAtt UbuntuServerBIT.PublicIp
 
   WindowsPublicIP:
-    Description: Direccion IP publica del servidor Windows Server 2025
+    Description: IP publica del servidor Windows
     Value: !GetAtt WindowsServerBIT.PublicIp
 
   RDSEndpoint:
-    Description: Endpoint de conexion para RDS MySQL desde instancias EC2
+    Description: Endpoint de RDS MySQL
     Value: !GetAtt BITRDSInstance.Endpoint.Address
 
-  RDSPort:
-    Description: Puerto de conexion para RDS MySQL
-    Value: !GetAtt BITRDSInstance.Endpoint.Port
-
-  RDSSecretArn:
-    Description: ARN del secreto con credenciales de acceso a RDS MySQL
-    Value: !GetAtt BITRDSInstance.MasterUserSecret.SecretArn
-
-  S3BucketName:
-    Description: Nombre del bucket S3 privado para almacenamiento
-    Value: !Ref BITS3Bucket
-
-  S3BucketArn:
-    Description: ARN del bucket S3 privado
-    Value: !GetAtt BITS3Bucket.Arn
-
   WordPressURL:
-    Description: URL para acceder e instalar WordPress
-    Value: !Sub http://${UbuntuServerBIT.PublicIp}
+    Description: ">>> ACCEDE AQUI A WORDPRESS <<<"
+    Value: !Sub "http://${UbuntuServerBIT.PublicIp}"
 
-  WordPressTestURL:
-    Description: URL de la pagina de prueba
-    Value: !Sub http://${UbuntuServerBIT.PublicIp}/test.html
+  WordPressAdminURL:
+    Description: Panel de administracion
+    Value: !Sub "http://${UbuntuServerBIT.PublicIp}/wp-admin"
 
-  UbuntuInstanceId:
-    Description: Instance ID del servidor Ubuntu
-    Value: !Ref UbuntuServerBIT
-
-  WindowsInstanceId:
-    Description: Instance ID del servidor Windows
-    Value: !Ref WindowsServerBIT
+  WordPressCredentials:
+    Description: Credenciales
+    Value: "admin / Grupo5RetoAgl"
