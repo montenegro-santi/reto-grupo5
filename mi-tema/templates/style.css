@@ -1,0 +1,106 @@
+/*
+Theme Name: Mi Tema Seidor
+Theme URI: https://intranet.local/seidor
+Author: Juan
+Author URI: https://intranet.local
+Description: Tema WordPress personalizado para panel de servicios (Seidor). Minimalista, rápido y orientado a soporte.
+Version: 1.0.0
+License: GNU General Public License v2 or later
+License URI: https://www.gnu.org/licenses/gpl-2.0.html
+Text Domain: mi-tema-seidor
+Tags: custom-background, custom-logo, custom-menu, featured-images, translation-ready
+*/
+
+/* ---------------------------
+   Base / Reset suave
+--------------------------- */
+:root{
+  --bg1:#0b1220;
+  --bg2:#0f1a31;
+  --text:#e9eefc;
+  --muted:#b7c3e6;
+  --brand:#4f7cff;
+  --brand2:#6a5cff;
+  --border:rgba(255,255,255,.10);
+  --border2:rgba(79,124,255,.60);
+  --shadow:0 20px 70px rgba(0,0,0,.35);
+  --radius:16px;
+  --max:1100px;
+  --font: system-ui, -apple-system, "Segoe UI", Roboto, Arial, "Noto Sans", "Helvetica Neue", sans-serif;
+}
+
+*{ box-sizing:border-box; }
+html{ scroll-behavior:smooth; }
+body{
+  margin:0;
+  font-family:var(--font);
+  color:var(--text);
+  background:linear-gradient(180deg,var(--bg1),var(--bg2));
+  -webkit-font-smoothing:antialiased;
+  -moz-osx-font-smoothing:grayscale;
+}
+
+a{ color:inherit; text-decoration:none; }
+a:hover{ text-decoration:none; }
+
+img{ max-width:100%; height:auto; display:block; }
+
+/* ---------------------------
+   Tipografía WP por defecto
+--------------------------- */
+.wp-site-blocks, .site, .site-main { min-height: 1px; }
+.entry-content{ line-height:1.6; color: var(--text); }
+.entry-content p{ margin: 0 0 1em; color: var(--muted); }
+
+/* ---------------------------
+   Contenedor utilitario
+--------------------------- */
+.container{
+  width:100%;
+  max-width:var(--max);
+  margin:0 auto;
+  padding:0 18px;
+}
+
+/* ---------------------------
+   Botones utilitarios
+--------------------------- */
+.btn{
+  display:inline-flex;
+  align-items:center;
+  gap:10px;
+  padding:10px 14px;
+  border-radius:12px;
+  border:1px solid var(--border);
+  background:rgba(255,255,255,.06);
+  color:var(--text);
+  font-weight:800;
+  font-size:13px;
+  transition:.15s transform, .15s border-color, .15s background;
+}
+.btn:hover{
+  transform:translateY(-1px);
+  border-color:var(--border2);
+  background:rgba(255,255,255,.09);
+}
+.btn.primary{
+  border-color:transparent;
+  background:linear-gradient(135deg,var(--brand),var(--brand2));
+}
+
+/* ---------------------------
+   Accesibilidad: focus visible
+--------------------------- */
+:focus{ outline:none; }
+:focus-visible{
+  outline:2px solid rgba(79,124,255,.9);
+  outline-offset:3px;
+  border-radius:10px;
+}
+
+/* ---------------------------
+   Admin bar (si estorba)
+--------------------------- */
+@media (max-width: 782px){
+  body.admin-bar{ padding-top:46px; }
+}
