@@ -38,7 +38,7 @@ Resources:
       VpcId: !Ref BITVPC
       InternetGatewayId: !Ref BITInternetGateway
 
-  # --- Subredes Públicas ---
+  # --- Subredes P?blicas ---
   BITPublicSubnet1:
     Type: AWS::EC2::Subnet
     Properties:
@@ -150,7 +150,7 @@ Resources:
       DestinationCidrBlock: 0.0.0.0/0
       NatGatewayId: !Ref BITNATGateway
 
-  # --- Asociaciones de Rutas Públicas ---
+  # --- Asociaciones de Rutas P?blicas ---
   AssocPublic1:
     Type: AWS::EC2::SubnetRouteTableAssociation
     Properties:
