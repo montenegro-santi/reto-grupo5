@@ -1,0 +1,660 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: VPC con WordPress + RDS MySQL + EFS - TOTALMENTE FUNCIONAL
+
+Parameters:
+  KeyName:
+    Type: AWS::EC2::KeyPair::KeyName
+    Description: Nombre del KeyPair para acceso SSH/RDP
+    Default: vockey
+  UbuntuAMI:
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Default: /aws/service/canonical/ubuntu/server/24.04/stable/current/amd64/hvm/ebs-gp3/ami-id
+  WindowsAMI:
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Default: /aws/service/ami-windows-latest/Windows_Server-2025-English-Full-Base
+
+Resources:
+  # ========== VPC & Networking ========== #
+  BITVPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 192.5.0.0/16
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+        - Key: Name
+          Value: BIT-VPC
+
+  BITInternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: BIT-InternetGateway
+
+  BITGatewayAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref BITVPC
+      InternetGatewayId: !Ref BITInternetGateway
+
+  # --- Subredes Públicas ---
+  BITPublicSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref BITVPC
+      CidrBlock: 192.5.1.0/24
+      AvailabilityZone: !Select [0, !GetAZs '']
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: BIT-PublicSubnet1
+
+  BITPublicSubnet2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref BITVPC
+      CidrBlock: 192.5.4.0/24
+      AvailabilityZone: !Select [1, !GetAZs '']
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: BIT-PublicSubnet2
+
+  BITPublicSubnet3:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref BITVPC
+      CidrBlock: 192.5.3.0/24
+      AvailabilityZone: !Select [2, !GetAZs '']
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: BIT-PublicSubnet3
+
+  # --- Subredes Privadas ---
+  BITPrivateSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref BITVPC
+      CidrBlock: 192.5.2.0/24
+      AvailabilityZone: !Select [0, !GetAZs '']
+      Tags:
+        - Key: Name
+          Value: BIT-PrivateSubnet1
+
+  BITPrivateSubnet2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref BITVPC
+      CidrBlock: 192.5.5.0/24
+      AvailabilityZone: !Select [1, !GetAZs '']
+      Tags:
+        - Key: Name
+          Value: BIT-PrivateSubnet2
+
+  BITPrivateSubnet3:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref BITVPC
+      CidrBlock: 192.5.6.0/24
+      AvailabilityZone: !Select [2, !GetAZs '']
+      Tags:
+        - Key: Name
+          Value: BIT-PrivateSubnet3
+
+  # --- NAT Gateway ---
+  BITNATEIP:
+    Type: AWS::EC2::EIP
+    DependsOn: BITGatewayAttachment
+    Properties:
+      Domain: vpc
+
+  BITNATGateway:
+    Type: AWS::EC2::NatGateway
+    Properties:
+      AllocationId: !GetAtt BITNATEIP.AllocationId
+      SubnetId: !Ref BITPublicSubnet1
+      Tags:
+        - Key: Name
+          Value: BIT-NATGateway
+
+  # --- Tablas de Rutas ---
+  BITPublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref BITVPC
+      Tags:
+        - Key: Name
+          Value: BIT-PublicRouteTable
+
+  BITPublicRoute:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref BITPublicRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref BITInternetGateway
+
+  BITPrivateRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref BITVPC
+      Tags:
+        - Key: Name
+          Value: BIT-PrivateRouteTable
+
+  BITPrivateRoute:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref BITPrivateRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref BITNATGateway
+
+  # --- Asociaciones de Rutas Públicas ---
+  AssocPublic1:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref BITPublicSubnet1
+      RouteTableId: !Ref BITPublicRouteTable
+
+  AssocPublic2:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref BITPublicSubnet2
+      RouteTableId: !Ref BITPublicRouteTable
+
+  AssocPublic3:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref BITPublicSubnet3
+      RouteTableId: !Ref BITPublicRouteTable
+
+  # --- Asociaciones de Rutas Privadas ---
+  AssocPrivate1:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref BITPrivateSubnet1
+      RouteTableId: !Ref BITPrivateRouteTable
+
+  AssocPrivate2:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref BITPrivateSubnet2
+      RouteTableId: !Ref BITPrivateRouteTable
+
+  AssocPrivate3:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref BITPrivateSubnet3
+      RouteTableId: !Ref BITPrivateRouteTable
+
+  # ========== Security Groups ========== #
+  BITUbuntuSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Acceso HTTP/HTTPS y SSH para servidor Ubuntu con Nginx
+      VpcId: !Ref BITVPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+      SecurityGroupEgress:
+        - IpProtocol: -1
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Name
+          Value: BIT-UbuntuSecurityGroup
+
+  BITWindowsSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Acceso RDP y SSH para servidor Windows
+      VpcId: !Ref BITVPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 3389
+          ToPort: 3389
+          CidrIp: 0.0.0.0/0
+      SecurityGroupEgress:
+        - IpProtocol: -1
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Name
+          Value: BIT-WindowsSecurityGroup
+
+  BITRDSSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Acceso MySQL exclusivamente por puerto 3306
+      VpcId: !Ref BITVPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 3306
+          ToPort: 3306
+          SourceSecurityGroupId: !Ref BITUbuntuSecurityGroup
+        - IpProtocol: tcp
+          FromPort: 3306
+          ToPort: 3306
+          SourceSecurityGroupId: !Ref BITWindowsSecurityGroup
+      Tags:
+        - Key: Name
+          Value: BIT-RDSSecurityGroup
+
+  # ========== EFS Security Group ========== #
+  BITEFSSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Acceso NFS para EFS desde instancias EC2
+      VpcId: !Ref BITVPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 2049
+          ToPort: 2049
+          SourceSecurityGroupId: !Ref BITUbuntuSecurityGroup
+        - IpProtocol: tcp
+          FromPort: 2049
+          ToPort: 2049
+          SourceSecurityGroupId: !Ref BITWindowsSecurityGroup
+      Tags:
+        - Key: Name
+          Value: BIT-EFSSecurityGroup
+
+  # ========== EFS File System ========== #
+  BITEFSFileSystem:
+    Type: AWS::EFS::FileSystem
+    Properties:
+      Encrypted: true
+      PerformanceMode: generalPurpose
+      ThroughputMode: bursting
+      FileSystemTags:
+        - Key: Name
+          Value: BIT-WordPress-EFS
+
+  # ========== EFS Mount Targets (3 AZs) ========== #
+  BITEFSMountTarget1:
+    Type: AWS::EFS::MountTarget
+    Properties:
+      FileSystemId: !Ref BITEFSFileSystem
+      SubnetId: !Ref BITPrivateSubnet1
+      SecurityGroups:
+        - !Ref BITEFSSecurityGroup
+
+  BITEFSMountTarget2:
+    Type: AWS::EFS::MountTarget
+    Properties:
+      FileSystemId: !Ref BITEFSFileSystem
+      SubnetId: !Ref BITPrivateSubnet2
+      SecurityGroups:
+        - !Ref BITEFSSecurityGroup
+
+  BITEFSMountTarget3:
+    Type: AWS::EFS::MountTarget
+    Properties:
+      FileSystemId: !Ref BITEFSFileSystem
+      SubnetId: !Ref BITPrivateSubnet3
+      SecurityGroups:
+        - !Ref BITEFSSecurityGroup
+
+  # ========== RDS MySQL Free Tier ========== #
+  BITDBSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupDescription: Grupo de subredes privadas para RDS MySQL
+      SubnetIds:
+        - !Ref BITPrivateSubnet1
+        - !Ref BITPrivateSubnet2
+      Tags:
+        - Key: Name
+          Value: BIT-DBSubnetGroup
+
+  BITRDSInstance:
+    Type: AWS::RDS::DBInstance
+    Properties:
+      DBInstanceIdentifier: bit-rds-mysql
+      DBInstanceClass: db.t3.micro
+      Engine: mysql
+      EngineVersion: 8.0.40
+      MasterUsername: admin
+      MasterUserPassword: Grupo5RetoAgl
+      DBName: wordpress
+      AllocatedStorage: 20
+      StorageType: gp2
+      DBSubnetGroupName: !Ref BITDBSubnetGroup
+      VPCSecurityGroups:
+        - !Ref BITRDSSecurityGroup
+      MultiAZ: false
+      PubliclyAccessible: false
+      BackupRetentionPeriod: 7
+      DeletionProtection: false
+      Tags:
+        - Key: Name
+          Value: BIT-RDS-MySQL-FreeTier
+
+  # ========== INSTANCIAS ========== #
+  UbuntuServerBIT:
+    Type: AWS::EC2::Instance
+    DependsOn:
+      - BITEFSMountTarget1
+      - BITEFSMountTarget2
+      - BITEFSMountTarget3
+      - BITRDSInstance
+    Properties:
+      ImageId: !Ref UbuntuAMI
+      InstanceType: t3.micro
+      KeyName: !Ref KeyName
+      NetworkInterfaces:
+        - DeviceIndex: 0
+          SubnetId: !Ref BITPublicSubnet1
+          GroupSet:
+            - !Ref BITUbuntuSecurityGroup
+          AssociatePublicIpAddress: true
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash
+          exec > >(tee /var/log/user-data.log|logger -t user-data -s 2>/dev/console) 2>&1
+          set -x
+          
+          echo "==== INICIO INSTALACION WORDPRESS ===="
+          date
+
+          # Variables de configuracion
+          DB_NAME="wordpress"
+          DB_USER="admin"
+          DB_PASSWORD="Grupo5RetoAgl"
+          DB_HOST="${BITRDSInstance.Endpoint.Address}"
+          WP_ADMIN_USER="admin"
+          WP_ADMIN_PASSWORD="Grupo5RetoAgl"
+          WP_ADMIN_EMAIL="admin@example.com"
+          WP_SITE_TITLE="WordPress BIT"
+
+          # Obtener IP publica
+          PUBLIC_IP=$(curl -s http://169.254.169.254/latest/meta-data/public-ipv4)
+          SITE_URL="http://$PUBLIC_IP"
+          
+          echo "========================================"
+          echo "IP Publica: $PUBLIC_IP"
+          echo "Site URL: $SITE_URL"
+          echo "DB Host: $DB_HOST"
+          echo "========================================"
+
+          # Actualizar sistema
+          export DEBIAN_FRONTEND=noninteractive
+          apt update -y
+          apt upgrade -y
+
+          # Instalar dependencias
+          apt install -y nfs-common nginx mysql-client amazon-ec2-* curl wget \
+            php8.3-fpm php8.3-mysql php8.3-cli php8.3-common php8.3-gd \
+            php8.3-curl php8.3-mbstring php8.3-xml php8.3-zip php8.3-soap \
+            php8.3-intl php8.3-bcmath
+
+          # Configurar EFS
+          mkdir -p /var/www/html
+          sleep 30
+          mount -t nfs4 -o nfsvers=4.1,rsize=1048576,wsize=1048576,hard,timeo=600,retrans=2,noresvport ${BITEFSFileSystem}.efs.${AWS::Region}.amazonaws.com:/ /var/www/html
+
+          # Montar EFS automaticamente
+          if ! grep -q "${BITEFSFileSystem}.efs.${AWS::Region}.amazonaws.com" /etc/fstab; then
+            echo "${BITEFSFileSystem}.efs.${AWS::Region}.amazonaws.com:/ /var/www/html nfs4 nfsvers=4.1,rsize=1048576,wsize=1048576,hard,timeo=600,retrans=2,noresvport,_netdev 0 0" >> /etc/fstab
+          fi
+
+          # Verificar si WordPress ya esta instalado
+          if [ ! -f /var/www/html/index.php ]; then
+            echo "Instalando WordPress..."
+            
+            cd /tmp
+            wget https://wordpress.org/latest.tar.gz
+            tar xzvf latest.tar.gz
+            mv wordpress/* /var/www/html/
+            rm -rf wordpress latest.tar.gz
+            
+            # Instalar WP-CLI
+            curl -O https://raw.githubusercontent.com/wp-cli/builds/gh-pages/phar/wp-cli.phar
+            chmod +x wp-cli.phar
+            mv wp-cli.phar /usr/local/bin/wp
+            
+            # Esperar RDS
+            echo "Esperando RDS MySQL..."
+            MAX_ATTEMPTS=60
+            ATTEMPT=0
+            until mysql -h $DB_HOST -u $DB_USER -p$DB_PASSWORD -e "SELECT 1" &>/dev/null; do
+              ATTEMPT=$((ATTEMPT+1))
+              if [ $ATTEMPT -ge $MAX_ATTEMPTS ]; then
+                echo "ERROR: RDS no disponible"
+                exit 1
+              fi
+              echo "Intento $ATTEMPT de $MAX_ATTEMPTS..."
+              sleep 10
+            done
+            echo "RDS disponible"
+            
+            # Verificar base de datos
+            mysql -h $DB_HOST -u $DB_USER -p$DB_PASSWORD -e "CREATE DATABASE IF NOT EXISTS $DB_NAME CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"
+            
+            # Crear wp-config.php
+            cd /var/www/html
+            cp wp-config-sample.php wp-config.php
+            
+            sed -i "s/database_name_here/$DB_NAME/g" wp-config.php
+            sed -i "s/username_here/$DB_USER/g" wp-config.php
+            sed -i "s/password_here/$DB_PASSWORD/g" wp-config.php
+            sed -i "s/localhost/$DB_HOST/g" wp-config.php
+            
+            # Generar claves de seguridad
+            SALT=$(curl -s https://api.wordpress.org/secret-key/1.1/salt/)
+            STRING='put your unique phrase here'
+            printf '%s\n' "g/$STRING/d" a "$SALT" . w | ed -s wp-config.php
+            
+            # FIX: Usar echo en lugar de heredoc para expansion correcta de variables
+            echo "<?php" > /tmp/wp-config-new.php
+            echo "/* Configuracion de URL */" >> /tmp/wp-config-new.php
+            echo "define('WP_HOME', '$SITE_URL');" >> /tmp/wp-config-new.php
+            echo "define('WP_SITEURL', '$SITE_URL');" >> /tmp/wp-config-new.php
+            echo "" >> /tmp/wp-config-new.php
+            
+            # Agregar el resto del archivo (sin el <?php inicial y SIN la definicion de WP_DEBUG)
+            tail -n +2 wp-config.php | sed '/define.*WP_DEBUG/d' >> /tmp/wp-config-new.php
+            mv /tmp/wp-config-new.php wp-config.php
+            
+            # Configurar permisos
+            chown -R www-data:www-data /var/www/html
+            find /var/www/html -type d -exec chmod 755 {} \;
+            find /var/www/html -type f -exec chmod 644 {} \;
+            
+            # Instalar WordPress con WP-CLI
+            echo "Instalando WordPress con WP-CLI..."
+            sudo -u www-data wp core install \
+              --path=/var/www/html \
+              --url="$SITE_URL" \
+              --title="$WP_SITE_TITLE" \
+              --admin_user="$WP_ADMIN_USER" \
+              --admin_password="$WP_ADMIN_PASSWORD" \
+              --admin_email="$WP_ADMIN_EMAIL" \
+              --skip-email \
+              --allow-root
+            
+            # Actualizar URLs en base de datos
+            mysql -h $DB_HOST -u $DB_USER -p$DB_PASSWORD $DB_NAME << EOFDB
+          UPDATE wp_options SET option_value='$SITE_URL' WHERE option_name='home';
+          UPDATE wp_options SET option_value='$SITE_URL' WHERE option_name='siteurl';
+          EOFDB
+            
+            echo "WordPress instalado correctamente"
+          else
+            echo "WordPress ya existe en EFS"
+            PUBLIC_IP=$(curl -s http://169.254.169.254/latest/meta-data/public-ipv4)
+            SITE_URL="http://$PUBLIC_IP"
+            
+            # Actualizar URLs en base de datos
+            mysql -h $DB_HOST -u $DB_USER -p$DB_PASSWORD $DB_NAME << EOFDB
+          UPDATE wp_options SET option_value='$SITE_URL' WHERE option_name='home';
+          UPDATE wp_options SET option_value='$SITE_URL' WHERE option_name='siteurl';
+          EOFDB
+          fi
+
+          # Permisos finales
+          chown -R www-data:www-data /var/www/html
+          find /var/www/html -type d -exec chmod 755 {} \;
+          find /var/www/html -type f -exec chmod 644 {} \;
+
+          # Configurar PHP-FPM
+          sed -i 's/memory_limit = .*/memory_limit = 256M/' /etc/php/8.3/fpm/php.ini
+          sed -i 's/upload_max_filesize = .*/upload_max_filesize = 100M/' /etc/php/8.3/fpm/php.ini
+          sed -i 's/post_max_size = .*/post_max_size = 100M/' /etc/php/8.3/fpm/php.ini
+          sed -i 's/max_execution_time = .*/max_execution_time = 300/' /etc/php/8.3/fpm/php.ini
+
+          # Configurar Nginx
+          cat > /etc/nginx/sites-available/wordpress << 'EOFNGINX'
+          server {
+              listen 80 default_server;
+              listen [::]:80 default_server;
+
+              root /var/www/html;
+              index index.php index.html index.htm;
+
+              server_name _;
+
+              client_max_body_size 100M;
+
+              location / {
+                  try_files $uri $uri/ /index.php?$args;
+              }
+
+              location ~ \.php$ {
+                  include snippets/fastcgi-php.conf;
+                  fastcgi_pass unix:/run/php/php8.3-fpm.sock;
+                  fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;
+                  include fastcgi_params;
+                  fastcgi_buffer_size 128k;
+                  fastcgi_buffers 256 16k;
+                  fastcgi_busy_buffers_size 256k;
+                  fastcgi_temp_file_write_size 256k;
+              }
+
+              location ~ /\.ht {
+                  deny all;
+              }
+
+              location = /favicon.ico {
+                  log_not_found off;
+                  access_log off;
+              }
+
+              location = /robots.txt {
+                  allow all;
+                  log_not_found off;
+                  access_log off;
+              }
+
+              location ~* \.(css|gif|ico|jpeg|jpg|js|png|woff|woff2|ttf|svg|eot)$ {
+                  expires max;
+                  log_not_found off;
+                  access_log off;
+              }
+          }
+          EOFNGINX
+
+          rm -f /etc/nginx/sites-enabled/default
+          ln -sf /etc/nginx/sites-available/wordpress /etc/nginx/sites-enabled/
+
+          nginx -t
+          systemctl restart php8.3-fpm
+          systemctl restart nginx
+          systemctl enable nginx
+          systemctl enable php8.3-fpm
+
+          # SSM Agent
+          snap install amazon-ssm-agent --classic || true
+          systemctl enable snap.amazon-ssm-agent.amazon-ssm-agent.service || true
+          systemctl start snap.amazon-ssm-agent.amazon-ssm-agent.service || true
+
+          echo "========================================="
+          echo "INSTALACION COMPLETADA"
+          echo "WordPress: $SITE_URL"
+          echo "Admin: $SITE_URL/wp-admin"
+          echo "User: admin / Grupo5RetoAgl"
+          echo "========================================="
+          date
+          
+          echo "Instalacion completa - $(date)" > /var/log/wordpress-install-complete.log
+      Tags:
+        - Key: Name
+          Value: Bastion-Ubuntu
+
+  WindowsServerBIT:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: !Ref WindowsAMI
+      InstanceType: t3.medium
+      KeyName: !Ref KeyName
+      NetworkInterfaces:
+        - DeviceIndex: 0
+          SubnetId: !Ref BITPublicSubnet3
+          GroupSet:
+            - !Ref BITWindowsSecurityGroup
+          AssociatePublicIpAddress: true
+      Tags:
+        - Key: Name
+          Value: WS-2025
+
+  # ========== S3 Bucket Privado ========== #
+  BITS3Bucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub bit-reto-bucket-${AWS::AccountId}-${AWS::Region}
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      VersioningConfiguration:
+        Status: Enabled
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      Tags:
+        - Key: Name
+          Value: BIT-S3-Bucket
+
+Outputs:
+  VPCId:
+    Description: ID de la VPC principal
+    Value: !Ref BITVPC
+
+  UbuntuPublicIP:
+    Description: IP publica del servidor Ubuntu
+    Value: !GetAtt UbuntuServerBIT.PublicIp
+
+  WindowsPublicIP:
+    Description: IP publica del servidor Windows
+    Value: !GetAtt WindowsServerBIT.PublicIp
+
+  RDSEndpoint:
+    Description: Endpoint de RDS MySQL
+    Value: !GetAtt BITRDSInstance.Endpoint.Address
+
+  WordPressURL:
+    Description: ">>> ACCEDE AQUI A WORDPRESS <<<"
+    Value: !Sub "http://${UbuntuServerBIT.PublicIp}"
+
+  WordPressAdminURL:
+    Description: Panel de administracion
+    Value: !Sub "http://${UbuntuServerBIT.PublicIp}/wp-admin"
+
+  WordPressCredentials:
+    Description: Credenciales
+    Value: "admin / Grupo5RetoAgl"
