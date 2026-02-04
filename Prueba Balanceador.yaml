@@ -1,0 +1,337 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: VPC con WordPress + RDS MySQL + EFS + ALB (HTTPS)
+
+Parameters:
+  KeyName:
+    Type: AWS::EC2::KeyPair::KeyName
+    Description: Nombre del KeyPair para acceso SSH/RDP
+    Default: vockey
+  UbuntuAMI:
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Default: /aws/service/canonical/ubuntu/server/24.04/stable/current/amd64/hvm/ebs-gp3/ami-id
+  WindowsAMI:
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Default: /aws/service/ami-windows-latest/Windows_Server-2025-English-Full-Base
+
+Resources:
+  # ========== VPC & Networking ========== #
+  BITVPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 192.5.0.0/16
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+        - Key: Name
+          Value: BIT-VPC
+
+  BITInternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: BIT-InternetGateway
+
+  BITGatewayAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref BITVPC
+      InternetGatewayId: !Ref BITInternetGateway
+
+  # --- Subredes Públicas ---
+  BITPublicSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref BITVPC
+      CidrBlock: 192.5.1.0/24
+      AvailabilityZone: !Select [0, !GetAZs '']
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: BIT-PublicSubnet1
+
+  BITPublicSubnet2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref BITVPC
+      CidrBlock: 192.5.4.0/24
+      AvailabilityZone: !Select [1, !GetAZs '']
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: BIT-PublicSubnet2
+
+  BITPublicSubnet3:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref BITVPC
+      CidrBlock: 192.5.3.0/24
+      AvailabilityZone: !Select [2, !GetAZs '']
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: BIT-PublicSubnet3
+
+  # --- Subredes Privadas ---
+  BITPrivateSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref BITVPC
+      CidrBlock: 192.5.2.0/24
+      AvailabilityZone: !Select [0, !GetAZs '']
+      Tags:
+        - Key: Name
+          Value: BIT-PrivateSubnet1
+
+  BITPrivateSubnet2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref BITVPC
+      CidrBlock: 192.5.5.0/24
+      AvailabilityZone: !Select [1, !GetAZs '']
+      Tags:
+        - Key: Name
+          Value: BIT-PrivateSubnet2
+
+  BITPrivateSubnet3:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref BITVPC
+      CidrBlock: 192.5.6.0/24
+      AvailabilityZone: !Select [2, !GetAZs '']
+      Tags:
+        - Key: Name
+          Value: BIT-PrivateSubnet3
+
+  # --- NAT Gateway ---
+  BITNATEIP:
+    Type: AWS::EC2::EIP
+    DependsOn: BITGatewayAttachment
+    Properties:
+      Domain: vpc
+
+  BITNATGateway:
+    Type: AWS::EC2::NatGateway
+    Properties:
+      AllocationId: !GetAtt BITNATEIP.AllocationId
+      SubnetId: !Ref BITPublicSubnet1
+      Tags:
+        - Key: Name
+          Value: BIT-NATGateway
+
+  # --- Tablas de Rutas ---
+  BITPublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref BITVPC
+      Tags:
+        - Key: Name
+          Value: BIT-PublicRouteTable
+
+  BITPublicRoute:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref BITPublicRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref BITInternetGateway
+
+  BITPrivateRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref BITVPC
+      Tags:
+        - Key: Name
+          Value: BIT-PrivateRouteTable
+
+  BITPrivateRoute:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref BITPrivateRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref BITNATGateway
+
+  # --- Asociaciones de Rutas ---
+  AssocPublic1:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties: {SubnetId: !Ref BITPublicSubnet1, RouteTableId: !Ref BITPublicRouteTable}
+  AssocPublic2:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties: {SubnetId: !Ref BITPublicSubnet2, RouteTableId: !Ref BITPublicRouteTable}
+  AssocPublic3:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties: {SubnetId: !Ref BITPublicSubnet3, RouteTableId: !Ref BITPublicRouteTable}
+  AssocPrivate1:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties: {SubnetId: !Ref BITPrivateSubnet1, RouteTableId: !Ref BITPrivateRouteTable}
+  AssocPrivate2:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties: {SubnetId: !Ref BITPrivateSubnet2, RouteTableId: !Ref BITPrivateRouteTable}
+  AssocPrivate3:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties: {SubnetId: !Ref BITPrivateSubnet3, RouteTableId: !Ref BITPrivateRouteTable}
+
+  # ========== Security Groups ========== #
+  BITUbuntuSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Acceso HTTP/HTTPS y SSH
+      VpcId: !Ref BITVPC
+      SecurityGroupIngress:
+        - {IpProtocol: tcp, FromPort: 22, ToPort: 22, CidrIp: 0.0.0.0/0}
+        - {IpProtocol: tcp, FromPort: 80, ToPort: 80, CidrIp: 0.0.0.0/0}
+        - {IpProtocol: tcp, FromPort: 443, ToPort: 443, CidrIp: 0.0.0.0/0}
+      SecurityGroupEgress:
+        - {IpProtocol: -1, CidrIp: 0.0.0.0/0}
+
+  BITRDSSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Acceso MySQL
+      VpcId: !Ref BITVPC
+      SecurityGroupIngress:
+        - {IpProtocol: tcp, FromPort: 3306, ToPort: 3306, SourceSecurityGroupId: !Ref BITUbuntuSecurityGroup}
+
+  BITEFSSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Acceso NFS para EFS
+      VpcId: !Ref BITVPC
+      SecurityGroupIngress:
+        - {IpProtocol: tcp, FromPort: 2049, ToPort: 2049, SourceSecurityGroupId: !Ref BITUbuntuSecurityGroup}
+
+  # ========== EFS & RDS ========== #
+  BITEFSFileSystem:
+    Type: AWS::EFS::FileSystem
+    Properties:
+      Encrypted: true
+      FileSystemTags: [{Key: Name, Value: BIT-WordPress-EFS}]
+
+  BITEFSMountTarget1:
+    Type: AWS::EFS::MountTarget
+    Properties: {FileSystemId: !Ref BITEFSFileSystem, SubnetId: !Ref BITPrivateSubnet1, SecurityGroups: [!Ref BITEFSSecurityGroup]}
+  BITEFSMountTarget2:
+    Type: AWS::EFS::MountTarget
+    Properties: {FileSystemId: !Ref BITEFSFileSystem, SubnetId: !Ref BITPrivateSubnet2, SecurityGroups: [!Ref BITEFSSecurityGroup]}
+
+  BITDBSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupDescription: Subredes privadas RDS
+      SubnetIds: [!Ref BITPrivateSubnet1, !Ref BITPrivateSubnet2]
+
+  BITRDSInstance:
+    Type: AWS::RDS::DBInstance
+    Properties:
+      DBInstanceIdentifier: bit-rds-mysql
+      DBInstanceClass: db.t3.micro
+      Engine: mysql
+      EngineVersion: 8.0.40
+      MasterUsername: admin
+      MasterUserPassword: Grupo5RetoAgl
+      DBName: wordpress
+      AllocatedStorage: 20
+      DBSubnetGroupName: !Ref BITDBSubnetGroup
+      VPCSecurityGroups: [!Ref BITRDSSecurityGroup]
+      PubliclyAccessible: false
+
+  # ========== LOAD BALANCER (ALB) ========== #
+  BITLoadBalancer:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Name: BIT-WP-ALB
+      Subnets: [!Ref BITPublicSubnet1, !Ref BITPublicSubnet2]
+      SecurityGroups: [!Ref BITUbuntuSecurityGroup]
+      Scheme: internet-facing
+
+  BITTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      VpcId: !Ref BITVPC
+      Protocol: HTTP
+      Port: 80
+      TargetType: instance
+      Targets: [{Id: !Ref UbuntuServerBIT}]
+      HealthCheckPath: /
+
+  HTTPListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      LoadBalancerArn: !Ref BITLoadBalancer
+      Port: 80
+      Protocol: HTTP
+      DefaultActions:
+        - Type: redirect
+          RedirectConfig: {Protocol: HTTPS, Port: '443', StatusCode: HTTP_301}
+
+  HTTPSListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      LoadBalancerArn: !Ref BITLoadBalancer
+      Port: 443
+      Protocol: HTTPS
+      Certificates:
+        - CertificateArn: "arn:aws:acm:us-east-1:319652602927:certificate/2962a24a-d4b1-4469-a4ba-67ada40ef035" # <--- PEGA TU ARN DE ACM AQUÍ
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref BITTargetGroup
+
+  # ========== INSTANCIA UBUNTU ========== #
+  UbuntuServerBIT:
+    Type: AWS::EC2::Instance
+    DependsOn: [BITRDSInstance]
+    Properties:
+      ImageId: !Ref UbuntuAMI
+      InstanceType: t3.micro
+      KeyName: !Ref KeyName
+      NetworkInterfaces:
+        - DeviceIndex: 0
+          SubnetId: !Ref BITPublicSubnet1
+          GroupSet: [!Ref BITUbuntuSecurityGroup]
+          AssociatePublicIpAddress: true
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash
+          # Instalación de WordPress preparada para ALB
+          DB_NAME="wordpress"
+          DB_USER="admin"
+          DB_PASSWORD="Grupo5RetoAgl"
+          DB_HOST="${BITRDSInstance.Endpoint.Address}"
+          # CAMBIA ESTO POR TU DOMINIO REAL
+          DOMAIN="eugen.aglinformatica5.com.es"
+          
+          apt update -y
+          apt install -y nfs-common nginx mysql-client php8.3-fpm php8.3-mysql php8.3-gd curl
+          
+          # Montar EFS
+          mkdir -p /var/www/html
+          mount -t nfs4 -o nfsvers=4.1,rsize=1048576,wsize=1048576,hard,timeo=600,retrans=2,noresvport ${BITEFSFileSystem}.efs.${AWS::Region}.amazonaws.com:/ /var/www/html
+          
+          if [ ! -f /var/www/html/index.php ]; then
+            cd /tmp
+            wget https://wordpress.org/latest.tar.gz
+            tar xzvf latest.tar.gz
+            mv wordpress/* /var/www/html/
+            
+            cd /var/www/html
+            cp wp-config-sample.php wp-config.php
+            sed -i "s/database_name_here/$DB_NAME/" wp-config.php
+            sed -i "s/username_here/$DB_USER/" wp-config.php
+            sed -i "s/password_here/$DB_PASSWORD/" wp-config.php
+            sed -i "s/localhost/$DB_HOST/" wp-config.php
+            
+            # CONFIGURACIÓN PARA HTTPS DETRÁS DE ALB
+            cat >> wp-config.php <<EOF
+          define('WP_HOME', 'https://$DOMAIN');
+          define('WP_SITEURL', 'https://$DOMAIN');
+          if (isset(\$_SERVER['HTTP_X_FORWARDED_PROTO']) && \$_SERVER['HTTP_X_FORWARDED_PROTO'] === 'https') {
+              \$_SERVER['HTTPS'] = 'on';
+          }
+          EOF
+            chown -R www-data:www-data /var/www/html
+          fi
+          systemctl restart nginx
+
+Outputs:
+  ALBDNS:
+    Description: DNS del Balanceador (Apunta tu CNAME aquí)
+    Value: !GetAtt BITLoadBalancer.DNSName
