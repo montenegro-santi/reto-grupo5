@@ -1,4 +1,4 @@
-AWSTemplateFormatVersion: '2010-09-09'
+AWSTemplateFormatVersion:  '2010-09-09'
 Description: VPC con WordPress + RDS MySQL + EFS - TOTALMENTE FUNCIONAL
 
 Parameters:
