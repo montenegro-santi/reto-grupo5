@@ -74,32 +74,35 @@ do {
             .\moverequipos.ps1
             Pause
         }
-       # --- CONFIGURACIÓN INICIAL ---
-$dominioDN = (Get-ADDomain).DistinguishedName
+       "4" $dominioDN = (Get-ADDomain).DistinguishedName
 $upnSuffix = (Get-ADDomain).DNSRoot
 $departamentos = @("Finanzas", "IT", "RRHH", "Soporte", "Ventas")
 
-Write-Host "Iniciando despliegue completo de la infraestructura..." -ForegroundColor Cyan
+Write-Host "--- INICIANDO DESPLIEGUE INTEGRAL GRUPO 5 ---" -ForegroundColor Cyan
 
-# 1. CREAR ESTRUCTURA DE OUs (Unidades Organizativas)
+# 1. CREAR ESTRUCTURA BASE (OU EMPRESA)
 $rutaEmpresa = "OU=Empresa,$dominioDN"
 if (-not (Get-ADOrganizationalUnit -Filter "DistinguishedName -eq '$rutaEmpresa'" -ErrorAction SilentlyContinue)) {
     New-ADOrganizationalUnit -Name "Empresa" -Path $dominioDN
+    Write-Host "[+] OU Empresa creada" -ForegroundColor Green
 }
 
-foreach ($tipo en @("Equipos", "Usuarios", "Grupos")) {
+# 2. CREAR CONTENEDORES PRINCIPALES (Equipos, Usuarios, Grupos)
+foreach ($tipo in @("Equipos", "Usuarios", "Grupos")) {
     $rutaTipo = "OU=$tipo,$rutaEmpresa"
     if (-not (Get-ADOrganizationalUnit -Filter "DistinguishedName -eq '$rutaTipo'" -ErrorAction SilentlyContinue)) {
         New-ADOrganizationalUnit -Name $tipo -Path $rutaEmpresa
     }
 }
 
-# 2. CREAR RAMAS Y GRUPOS POR DEPARTAMENTO
+# 3. PROCESAR LAS 5 RAMAS
 foreach ($dep in $departamentos) {
-    # OUs de cada departamento
+    Write-Host "`nConfigurando rama: $dep" -ForegroundColor White
+    
     $pathDepEquipos = "OU=$dep,OU=Equipos,$rutaEmpresa"
     $pathDepUsuarios = "OU=$dep,OU=Usuarios,$rutaEmpresa"
 
+    # Crear OUs de departamento
     if (-not (Get-ADOrganizationalUnit -Filter "DistinguishedName -eq '$pathDepEquipos'" -ErrorAction SilentlyContinue)) {
         New-ADOrganizationalUnit -Name $dep -Path "OU=Equipos,$rutaEmpresa"
     }
@@ -107,14 +110,15 @@ foreach ($dep in $departamentos) {
         New-ADOrganizationalUnit -Name $dep -Path "OU=Usuarios,$rutaEmpresa"
     }
 
-    # Crear Grupo del departamento
-    $nombreGrupo = "G_$dep"
+    # Crear Grupo de Seguridad
+    $nombreGrupo = "GS_$dep"
     if (-not (Get-ADGroup -Filter "Name -eq '$nombreGrupo'" -ErrorAction SilentlyContinue)) {
         New-ADGroup -Name $nombreGrupo -GroupScope Global -Path "OU=Grupos,$rutaEmpresa"
-        Write-Host "  [+] Grupo ${nombreGrupo} creado." -ForegroundColor Green
+        Write-Host "  [+] Grupo ${nombreGrupo} creado" -ForegroundColor Green
     }
 
-    # 3. CREAR EQUIPOS (4 por rama) - Solución al error de Substring e InvalidVariable
+    # 4. CREAR 4 EQUIPOS POR RAMA (Corrección IT y Dos Puntos)
+    # Si es 'IT', el prefijo es 'IT', si no, las primeras 3 letras
     $prefijo = if ($dep.Length -lt 3) { $dep.ToUpper() } else { $dep.Substring(0,3).ToUpper() }
 
     for ($i = 1; $i -le 4; $i++) {
@@ -122,32 +126,25 @@ foreach ($dep in $departamentos) {
         try {
             if (-not (Get-ADComputer -Filter "Name -eq '$nombrePC'" -ErrorAction SilentlyContinue)) {
                 New-ADComputer -Name $nombrePC -SamAccountName "${nombrePC}$" -Path $pathDepEquipos -Enabled $true
-                # El uso de ${} evita el error InvalidVariableReferenceWithDrive
-                Write-Host "    [OK] Equipo ${nombrePC}: Creado en ${dep}" -ForegroundColor Gray
+                # Protegemos la variable con ${} para evitar el error de la captura image_c5aefc.png
+                Write-Host "    [OK] Equipo ${nombrePC}: Creado" -ForegroundColor Gray
             }
         } catch {
-            Write-Host "    [!] Error en PC ${nombrePC}: $($_.Exception.Message)" -ForegroundColor Red
+            Write-Host "    [!] Error en ${nombrePC}: $($_.Exception.Message)" -ForegroundColor Red
         }
     }
 
-    # 4. CREAR USUARIO EJEMPLO (Opcional, 1 por rama)
-    $nombreUser = "User$dep"
-    if (-not (Get-ADUser -Filter "SamAccountName -eq '$nombreUser'" -ErrorAction SilentlyContinue)) {
-        $params = @{
-            'Name' = $nombreUser
-            'SamAccountName' = $nombreUser
-            'UserPrincipalName' = "$nombreUser@$upnSuffix"
-            'Path' = $pathDepUsuarios
-            'AccountPassword' = (ConvertTo-SecureString "Password123!" -AsPlainText -Force)
-            'Enabled' = $true
-        }
-        New-ADUser @params
-        Add-ADGroupMember -Identity $nombreGrupo -Members $nombreUser
-        Write-Host "    [OK] Usuario ${nombreUser} creado y añadido a ${nombreGrupo}" -ForegroundColor Yellow
+    # 5. CREAR USUARIO DE PRUEBA
+    $uNombre = "User_$dep"
+    if (-not (Get-ADUser -Filter "SamAccountName -eq '$uNombre'" -ErrorAction SilentlyContinue)) {
+        New-ADUser -Name $uNombre -SamAccountName $uNombre -Path $pathDepUsuarios -Enabled $true -DisplayName "Usuario $dep"
+        Add-ADGroupMember -Identity $nombreGrupo -Members $uNombre
+        Write-Host "  [+] Usuario ${uNombre} creado y unido a ${nombreGrupo}" -ForegroundColor Yellow
     }
 }
 
-Write-Host "`n--- DESPLIEGUE FINALIZADO CON ÉXITO ---" -ForegroundColor Green
+Write-Host "`n--- PROCESO COMPLETADO ---" -ForegroundColor Cyan
+Pause
         "5" {
             Write-Host "Abriendo archivos de registro..." -ForegroundColor Cyan
             if (Test-Path ".\provision-ad.log") { notepad ".\provision-ad.log" }
