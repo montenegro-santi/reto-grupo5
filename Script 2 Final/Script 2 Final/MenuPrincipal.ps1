@@ -84,46 +84,56 @@ do {
         $rutaEmpresa = "OU=Empresa,$dominioDN"
         if (-not (Get-ADOrganizationalUnit -Filter "DistinguishedName -eq '$rutaEmpresa'" -ErrorAction SilentlyContinue)) {
             New-ADOrganizationalUnit -Name "Empresa" -Path $dominioDN
-            Start-Sleep -Seconds 1
+            Write-Host "[+] Creada OU: Empresa" -ForegroundColor Green
         }
 
         $rutaEquipos = "OU=Equipos,$rutaEmpresa"
         if (-not (Get-ADOrganizationalUnit -Filter "DistinguishedName -eq '$rutaEquipos'" -ErrorAction SilentlyContinue)) {
             New-ADOrganizationalUnit -Name "Equipos" -Path $rutaEmpresa
-            Start-Sleep -Seconds 1
+            Write-Host "[+] Creada OU: Equipos" -ForegroundColor Green
         }
 
+        # Aseguramos que las 5 sub-OUs existan antes de pasar al siguiente paso
         foreach ($dep in $departamentos) {
             $pathDep = "OU=$dep,$rutaEquipos"
             if (-not (Get-ADOrganizationalUnit -Filter "DistinguishedName -eq '$pathDep'" -ErrorAction SilentlyContinue)) {
                 New-ADOrganizationalUnit -Name $dep -Path $rutaEquipos
+                Write-Host "  [+] Creada rama: $dep" -ForegroundColor Green
             }
         }
+        
+        # Pausa de seguridad para que AD replique las nuevas carpetas
+        Start-Sleep -Seconds 2
 
         # PASO 2: Usuarios y Grupos (Creausuarios.ps1)
         if (Test-Path ".\Creausuarios.ps1") {
+            Write-Host "[2/3] Ejecutando script de usuarios..." -ForegroundColor Yellow
             .\Creausuarios.ps1 -CsvPath ".\usuarios.csv" -DomainDN $dominioDN -UpnSuffix $upnSuffix -Delimiter ";"
         }
 
-        # PASO 3: Generar 4 Equipos por Departamento (Lógica Multi-Equipo)
+        # PASO 3: Generar 4 Equipos por Departamento
         Write-Host "[3/3] Generando 4 PCs por cada unidad organizativa..." -ForegroundColor Yellow
         foreach ($dep in $departamentos) {
-            $destinoPC = "OU=$dep,$rutaEquipos"
+            # IMPORTANTE: Definimos la ruta exacta de nuevo aquí
+            $destinoPC = "OU=$dep,OU=Equipos,OU=Empresa,$dominioDN"
             
-            # Arreglo para el error de Substring: si es corto, usa el nombre entero
+            # Lógica de nombre (Ya la tenías bien, la mantenemos)
             $prefijo = if ($dep.Length -ge 3) { $dep.Substring(0,3).ToUpper() } else { $dep.ToUpper() }
 
             for ($i = 1; $i -le 4; $i++) {
-                $nombrePC = "${prefijo}-PC0$i" # Genera PC01, PC02, PC03, PC04
+                $nombrePC = "${prefijo}-PC0$i"
                 
                 try {
-                    if (-not (Get-ADComputer -Filter "Name -eq '$nombrePC'")) {
-                        # Creamos el equipo en su ruta específica (NO en Computers general)
-                        New-ADComputer -Name $nombrePC -SamAccountName "$nombrePC$" -Path $destinoPC -Enabled $true
-                        Write-Host "  [OK] Creado: $nombrePC en $dep" -ForegroundColor Gray
+                    # Verificamos existencia con ErrorAction SilentlyContinue para evitar rojos innecesarios
+                    if (-not (Get-ADComputer -Filter "Name -eq '$nombrePC'" -ErrorAction SilentlyContinue)) {
+                        New-ADComputer -Name $nombrePC -SamAccountName "${nombrePC}$" -Path $destinoPC -Enabled $true
+                        Write-Host "    [OK] Creado: ${nombrePC} en ${dep}" -ForegroundColor Gray
+                    } else {
+                        Write-Host "    [-] Saltado: ${nombrePC} ya existe" -ForegroundColor DarkGray
                     }
                 } catch {
-                    Write-Host "  [!] Error al crear ${nombrePC}: $($_.Exception.Message)" -ForegroundColor Red
+                    # Usamos ${nombrePC} con llaves para evitar el error de los dos puntos (:)
+                    Write-Host "    [!] Error en ${nombrePC}: $($_.Exception.Message)" -ForegroundColor Red
                 }
             }
         }
