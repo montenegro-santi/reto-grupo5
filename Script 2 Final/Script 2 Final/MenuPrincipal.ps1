@@ -75,56 +75,50 @@ do {
             Pause
         }
        "4" {
-    Write-Host "--- AUTOMATIZACION TOTAL: USUARIOS Y EQUIPOS ---" -ForegroundColor Cyan
-    $dominioDN = (Get-ADDomain).DistinguishedName
-    $upnSuffix = (Get-ADDomain).DNSRoot
-    $departamentos = @("Finanzas", "IT", "RRHH", "Soporte", "Ventas")
+        Write-Host "--- AUTOMATIZACION TOTAL ---" -ForegroundColor Cyan
+        $dominioDN = (Get-ADDomain).DistinguishedName
+        $upnSuffix = (Get-ADDomain).DNSRoot
+        $departamentos = @("Finanzas", "IT", "RRHH", "Soporte", "Ventas")
 
-    # PASO 1: Crear toda la estructura de OUs primero
-    $rutaEmpresa = "OU=Empresa,$dominioDN"
-    if (-not (Get-ADOrganizationalUnit -Filter "DistinguishedName -eq '$rutaEmpresa'" -ErrorAction SilentlyContinue)) {
-        New-ADOrganizationalUnit -Name "Empresa" -Path $dominioDN
-        Start-Sleep -Seconds 1
-    }
-
-    # Crear rama de Equipos
-    $rutaEquipos = "OU=Equipos,$rutaEmpresa"
-    if (-not (Get-ADOrganizationalUnit -Filter "DistinguishedName -eq '$rutaEquipos'" -ErrorAction SilentlyContinue)) {
-        New-ADOrganizationalUnit -Name "Equipos" -Path $rutaEmpresa
-    }
-
-    foreach ($dep in $departamentos) {
-        $pathDep = "OU=$dep,$rutaEquipos"
-        if (-not (Get-ADOrganizationalUnit -Filter "DistinguishedName -eq '$pathDep'" -ErrorAction SilentlyContinue)) {
-            New-ADOrganizationalUnit -Name $dep -Path $rutaEquipos
+        # PASO 1: Estructura de OUs (Empresa > Equipos > Deps)
+        $rutaEmpresa = "OU=Empresa,$dominioDN"
+        if (-not (Get-ADOrganizationalUnit -Filter "DistinguishedName -eq '$rutaEmpresa'" -ErrorAction SilentlyContinue)) {
+            New-ADOrganizationalUnit -Name "Empresa" -Path $dominioDN
+            Start-Sleep -Seconds 1
         }
-    }
 
-    # PASO 2: Crear Usuarios y Grupos (Llamando a tu script)
-    if (Test-Path ".\Creausuarios.ps1") {
-        .\Creausuarios.ps1 -CsvPath ".\usuarios.csv" -DomainDN $dominioDN -UpnSuffix $upnSuffix -Delimiter ";"
-    }
+        $rutaEquipos = "OU=Equipos,$rutaEmpresa"
+        if (-not (Get-ADOrganizationalUnit -Filter "DistinguishedName -eq '$rutaEquipos'" -ErrorAction SilentlyContinue)) {
+            New-ADOrganizationalUnit -Name "Equipos" -Path $rutaEmpresa
+            Start-Sleep -Seconds 1
+        }
 
-    # PASO 3: Crear Equipos (Sin el error de los dos puntos)
-    Write-Host "[3/3] Creando objetos de equipo..." -ForegroundColor Yellow
-    Start-Sleep -Seconds 2
-    foreach ($dep in $departamentos) {
-        $destinoPC = "OU=$dep,$rutaEquipos"
-        $nombrePC = "$($dep.Substring(0,3).ToUpper())-PC01"
-        
-        try {
+        foreach ($dep in $departamentos) {
+            $pathDep = "OU=$dep,$rutaEquipos"
+            if (-not (Get-ADOrganizationalUnit -Filter "DistinguishedName -eq '$pathDep'" -ErrorAction SilentlyContinue)) {
+                New-ADOrganizationalUnit -Name $dep -Path $rutaEquipos
+            }
+        }
+
+        # PASO 2: Usuarios y Grupos (Creausuarios.ps1)
+        if (Test-Path ".\Creausuarios.ps1") {
+            .\Creausuarios.ps1 -CsvPath ".\usuarios.csv" -DomainDN $dominioDN -UpnSuffix $upnSuffix -Delimiter ";"
+        }
+
+        # PASO 3: Creación de Equipos (PC01 para cada departamento)
+        Write-Host "[3/3] Creando objetos de equipo..." -ForegroundColor Yellow
+        foreach ($dep in $departamentos) {
+            $destinoPC = "OU=$dep,$rutaEquipos"
+            $nombrePC = "$($dep.Substring(0,3).ToUpper())-PC01"
+            
             if (-not (Get-ADComputer -Filter "Name -eq '$nombrePC'")) {
                 New-ADComputer -Name $nombrePC -SamAccountName "$nombrePC$" -Path $destinoPC -Enabled $true
-                Write-Host "  [OK] Equipo ${nombrePC} creado." -ForegroundColor Gray
+                Write-Host "  [OK] Equipo creado $nombrePC" -ForegroundColor Gray
             }
-        } catch {
-            # Aquí usamos las llaves {} para evitar el error de la captura image_c5aafc.png
-            Write-Host "  [!] Error con el equipo ${nombrePC}: El servidor aun procesa la OU." -ForegroundColor Red
         }
+        Write-Host "--- PROCESO FINALIZADO ---" -ForegroundColor Green
+        Pause
     }
-    Write-Host "--- PROCESO FINALIZADO ---" -ForegroundColor Green
-    Pause
-}
         "5" {
             Write-Host "Abriendo archivos de registro..." -ForegroundColor Cyan
             if (Test-Path ".\provision-ad.log") { notepad ".\provision-ad.log" }
