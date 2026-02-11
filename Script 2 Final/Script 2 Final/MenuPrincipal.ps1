@@ -47,7 +47,8 @@ function Mostrar-Menu {
     Write-Host "4. EJECUTAR TODO EL PROCESO (Full Auto)"
     Write-Host "5. Ver Archivos de LOG"
     Write-Host "6. ROLLBACK (Limpiar Dominio)" -ForegroundColor Red
-    Write-Host "7. Salir"
+    Write-Host "7. Ver salud de los servicios (DNS/AD)"
+    Write-Host "8. Salir"
     Write-Host "=============================================="
 }
 
