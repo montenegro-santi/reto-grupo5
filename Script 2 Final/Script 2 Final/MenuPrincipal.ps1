@@ -231,51 +231,55 @@ do {
             if ($backupFile) {
                 Write-Host "Cargando archivo: $($backupFile.Name)" -ForegroundColor Yellow
                 $datos = Import-Csv -Path $backupFile.FullName -Encoding UTF8
+                $dominioDN = (Get-ADDomain).DistinguishedName
 
-                # --- PASO 1: Restaurar Unidades Organizativas (OUs) ---
-                Write-Host "[1/4] Restaurando Unidades Organizativas..." -ForegroundColor White
-                $datos | Where-Object { $_.ObjectClass -eq "organizationalUnit" } | ForEach-Object {
+                # --- PASO 0: ASEGURAR ESTRUCTURA BASE (Evita errores de 'Object Not Found') ---
+                # Forzamos la creación de la raíz para que las sub-OUs tengan donde apoyarse
+                $nombresBase = @("Empresa", "Equipos", "Usuarios", "Grupos")
+                foreach ($nombre in $nombresBase) {
+                    $rutaPadre = if ($nombre -eq "Empresa") { $dominioDN } else { "OU=Empresa,$dominioDN" }
+                    $dnCompleto = if ($nombre -eq "Empresa") { "OU=Empresa,$dominioDN" } else { "OU=$nombre,OU=Empresa,$dominioDN" }
+                    
+                    if (-not (Get-ADOrganizationalUnit -Filter "DistinguishedName -eq '$dnCompleto'" -ErrorAction SilentlyContinue)) {
+                        New-ADOrganizationalUnit -Name $nombre -Path $rutaPadre -ErrorAction SilentlyContinue
+                        Write-Host "[+] Estructura base asegurada: $nombre" -ForegroundColor Green
+                    }
+                }
+
+                # --- PASO 1: Restaurar OUs de los Departamentos ---
+                Write-Host "[1/4] Restaurando OUs de Departamentos..." -ForegroundColor White
+                $datos | Where-Object { $_.ObjectClass -eq "organizationalUnit" -and $_.Name -notin $nombresBase } | ForEach-Object {
                     if (-not (Get-ADOrganizationalUnit -Filter "DistinguishedName -eq '$($_.DistinguishedName)'" -ErrorAction SilentlyContinue)) {
-                        # Extraemos el nombre y la ruta superior
-                        $nombre = $_.Name
                         $padreDN = $_.DistinguishedName -replace "^OU=[^,]+,",""
                         try {
-                            New-ADOrganizationalUnit -Name $nombre -Path $padreDN -ErrorAction SilentlyContinue
-                            Write-Host "  [OK] OU Creada: $nombre" -ForegroundColor Gray
+                            New-ADOrganizationalUnit -Name $_.Name -Path $padreDN -ErrorAction SilentlyContinue
+                            Write-Host "  [OK] OU: $($_.Name)" -ForegroundColor Gray
                         } catch { }
                     }
                 }
 
                 # --- PASO 2: Restaurar Grupos ---
-                Write-Host "[2/4] Restaurando Grupos de Seguridad..." -ForegroundColor White
+                Write-Host "[2/4] Restaurando Grupos..." -ForegroundColor White
                 $datos | Where-Object { $_.ObjectClass -eq "group" } | ForEach-Object {
-                    if (-not (Get-ADGroup -Filter "DistinguishedName -eq '$($_.DistinguishedName)'" -ErrorAction SilentlyContinue)) {
+                    if (-not (Get-ADGroup -Filter "SamAccountName -eq '$($_.SamAccountName)'" -ErrorAction SilentlyContinue)) {
                         $padreDN = $_.DistinguishedName -replace "^CN=[^,]+,",""
                         New-ADGroup -Name $_.Name -SamAccountName $_.SamAccountName -GroupScope Global -Path $padreDN -ErrorAction SilentlyContinue
-                        Write-Host "  [OK] Grupo Creado: $($_.Name)" -ForegroundColor Gray
                     }
                 }
 
-                # --- PASO 3: Restaurar Usuarios y sus Membresías ---
-                Write-Host "[3/4] Restaurando Usuarios y Grupos..." -ForegroundColor White
-                $datos | Where-Object { $_.ObjectClass -eq "user" } | ForEach-Object {
-                    $user = $_
-                    if (-not (Get-ADUser -Filter "SamAccountName -eq '$($user.SamAccountName)'" -ErrorAction SilentlyContinue)) {
-                        $padreDN = $user.DistinguishedName -replace "^CN=[^,]+,",""
-                        $pass = ConvertTo-SecureString "Password123!" -AsPlainText -Force
-                        
-                        New-ADUser -Name $user.Name -SamAccountName $user.SamAccountName -DisplayName $user.DisplayName `
-                                   -Path $padreDN -AccountPassword $pass -Enabled $true -ErrorAction SilentlyContinue
-                        Write-Host "  [OK] Usuario: $($user.SamAccountName)" -ForegroundColor Gray
+                # --- PASO 3: Usuarios con Membresía de Grupo ---
+                Write-Host "[3/4] Restaurando Usuarios y Membresías..." -ForegroundColor White
+                $datos | Where-Object { $_.ObjectClass -eq "user" -and $_.SamAccountName -ne "Administrator" } | ForEach-Object {
+                    $u = $_
+                    if (-not (Get-ADUser -Filter "SamAccountName -eq '$($u.SamAccountName)'" -ErrorAction SilentlyContinue)) {
+                        $padreDN = $u.DistinguishedName -replace "^CN=[^,]+,",""
+                        $pass = ConvertTo-SecureString "Password2026!" -AsPlainText -Force
+                        New-ADUser -Name $u.Name -SamAccountName $u.SamAccountName -Path $padreDN -AccountPassword $pass -Enabled $true -ErrorAction SilentlyContinue
                     }
-
-                    # RESTAURAR GRUPOS (Membresía)
-                    if ($user.Groups) {
-                        $listaGrupos = $user.Groups -split ';'
-                        foreach ($gDN in $listaGrupos) {
-                            try {
-                                Add-ADGroupMember -Identity $gDN -Members $user.SamAccountName -ErrorAction SilentlyContinue
-                            } catch { }
+                    # Restaurar grupos si la columna 'Groups' existe en tu backup mejorado
+                    if ($u.Groups) {
+                        $u.Groups -split ';' | ForEach-Object {
+                            try { Add-ADGroupMember -Identity $_ -Members $u.SamAccountName -ErrorAction SilentlyContinue } catch {}
                         }
                     }
                 }
@@ -291,7 +295,7 @@ do {
                 }
 
             } else {
-                Write-Host "No se encontró ningún archivo de backup (.csv) en la carpeta del script." -ForegroundColor Red
+                Write-Host "No se encontró ningún archivo de backup (.csv)." -ForegroundColor Red
             }
             Write-Host "--- RESTAURACION FINALIZADA ---" -ForegroundColor Cyan
             Pause
