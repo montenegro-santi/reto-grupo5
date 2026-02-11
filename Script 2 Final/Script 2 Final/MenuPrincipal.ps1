@@ -77,20 +77,34 @@ do {
         "4" {
     Write-Host "--- INICIANDO PROCESO DE AUTOMATIZACION COMPLETO ---" -ForegroundColor Cyan
     
-    # 1. Crear Usuarios, OUs y GRUPOS (Esto llama a tu script Creausuarios.ps1)
-    Write-Host "[1/3] Creando estructura de OUs, Grupos y Usuarios..." -ForegroundColor Yellow
-    .\Creausuarios.ps1 -CsvPath ".\usuarios.csv" -DomainDN $domainDN -UpnSuffix $upnSuffix
+    # 1. Crear OUs, Grupos y Usuarios usando tu script Creausuarios.ps1
+    if (Test-Path ".\Creausuarios.ps1") {
+        Write-Host "[1/2] Creando estructura y usuarios..." -ForegroundColor Yellow
+        .\Creausuarios.ps1 -CsvPath ".\usuarios.csv" -DomainDN $domainDN -UpnSuffix $upnSuffix
+    } else {
+        Write-Host "[!] Error: No se encuentra Creausuarios.ps1" -ForegroundColor Red
+    }
+
+    # 2. Crear Equipos directamente (Para no depender de archivos externos)
+    Write-Host "[2/2] Creando y organizando equipos por departamento..." -ForegroundColor Yellow
     
-    # 2. Crear Objetos de Equipo
-    Write-Host "[2/3] Creando objetos de equipo..." -ForegroundColor Yellow
-    # Asegúrate de que este script exista o usa la lógica de New-ADComputer
-    .\CreaEquipos.ps1 
+    # Lista de departamentos para crear equipos de ejemplo
+    $departamentos = @("IT", "Ventas", "RRHH", "Finanzas")
+    $rutaEmpresa = "OU=Equipos,OU=Empresa,$domainDN"
 
-    # 3. Organizar Equipos
-    Write-Host "[3/3] Organizando equipos en sus departamentos..." -ForegroundColor Yellow
-    .\OrganizarEquipos.ps1
+    foreach ($dep in $departamentos) {
+        $rutaDep = "OU=$dep,$rutaEmpresa"
+        # Verificamos si la OU del departamento existe
+        if (Test-Path "AD:\$rutaDep") {
+            $nombreEquipo = "$($dep)-PC01"
+            if (-not (Get-ADComputer -Filter "Name -eq '$nombreEquipo'")) {
+                New-ADComputer -Name $nombreEquipo -SamAccountName "$nombreEquipo$" -Path $rutaDep
+                Write-Host "Equipo $nombreEquipo creado en $dep" -ForegroundColor Gray
+            }
+        }
+    }
 
-    Write-Host "--- PROCESO FINALIZADO CON EXITO ---" -ForegroundColor Green
+    Write-Host "--- PROCESO FINALIZADO ---" -ForegroundColor Green
     Pause
 }
         "5" {
