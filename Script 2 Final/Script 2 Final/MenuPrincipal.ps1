@@ -167,28 +167,26 @@ do {
             Pause
             }   
         "10"{
-    $fecha = Get-Date -Format "yyyyMMdd_HHmm"
-    $rutaFinal = "$PSScriptRoot\Backup_Total_$fecha.csv"
-    
-    Write-Host "Generando Backup Total ordenado por jerarquia..." -ForegroundColor Yellow
-    
-    # Obtenemos todos los objetos
-    $todosLosObjetos = Get-ADObject -Filter * -IncludeDeletedObjects -Properties * | 
-                       Select-Object Name, ObjectClass, DistinguishedName, SamAccountName, Category
+            $fecha = Get-Date -Format "yyyyMMdd_HHmm"
+            $rutaFinal = "$PSScriptRoot\Backup_Total_$fecha.csv"
+            
+            Write-Host "Generando Backup Total con Jerarquía y Membresías..." -ForegroundColor Yellow
+            
+            # Capturamos todos los objetos con sus propiedades extendidas (incluyendo a qué grupos pertenecen)
+            $objetos = Get-ADObject -Filter * -Properties Name, ObjectClass, DistinguishedName, SamAccountName, MemberOf, DisplayName | 
+                       Select-Object Name, ObjectClass, DistinguishedName, SamAccountName, DisplayName, 
+                       @{Name='Groups'; Expression={$_.MemberOf -join ';'}} # Guardamos los grupos separados por ';'
 
-    # Los ordenamos: Primero OUs, luego Grupos, luego el resto (Usuarios y Equipos)
-    $objetosOrdenados = $todosLosObjetos | Sort-Object {
-        if ($_.ObjectClass -eq "organizationalUnit") { 1 }
-        elseif ($_.ObjectClass -eq "group") { 2 }
-        else { 3 }
-    }
-
-    $objetosOrdenados | Export-Csv -Path $rutaFinal -NoTypeInformation -Encoding UTF8
-    
-    Write-Host "Backup Total creado y ordenado con exito!" -ForegroundColor Green
-    Write-Host "Ubicacion: $rutaFinal" -ForegroundColor Cyan
-    Pause
-}
+            # Orden jerárquico vital: 1º OUs, 2º Grupos, 3º Usuarios/Equipos
+            $objetos | Sort-Object {
+                if ($_.ObjectClass -eq "organizationalUnit") { 1 }
+                elseif ($_.ObjectClass -eq "group") { 2 }
+                else { 3 }
+            } | Export-Csv -Path $rutaFinal -NoTypeInformation -Encoding UTF8
+            
+            Write-Host "Backup completado en: $rutaFinal" -ForegroundColor Green
+            Pause
+        }
         "11"{
             Write-Host "`n--- AUDITORÍA PROACTIVA DE SEGURIDAD ---" -ForegroundColor Cyan -BackgroundColor Black
     
@@ -227,78 +225,75 @@ do {
             Pause
             }
         "12"{
-            $archivo = Get-ChildItem -Path "$PSScriptRoot\Backup_Total_*.csv" | Sort-Object LastWriteTime -Descending | Select-Object -First 1
-            if ($archivo) {
-                # Importamos con UTF8 para que respete las tildes de los nombres de usuario
-                $datos = Import-Csv -Path $archivo.FullName -Encoding UTF8
-                $dominioRaiz = (Get-ADDomain).DistinguishedName
+            Write-Host "--- INICIANDO RESTAURACION TOTAL DESDE BACKUP ---" -ForegroundColor Cyan
+            $backupFile = Get-ChildItem -Path "$PSScriptRoot\Backup_Total_*.csv" | Sort-Object LastWriteTime -Descending | Select-Object -First 1
 
-                Write-Host "--- INICIANDO RESTAURACION JERARQUICA TOTAL ---" -ForegroundColor Cyan
+            if ($backupFile) {
+                Write-Host "Cargando archivo: $($backupFile.Name)" -ForegroundColor Yellow
+                $datos = Import-Csv -Path $backupFile.FullName -Encoding UTF8
 
-                # PASO 1: Crear Unidades Organizativas (OUs)
-                # Las filtramos primero para asegurar que los 'cajones' existan
-                foreach ($obj in $datos | Where-Object { $_.ObjectClass -eq "organizationalUnit" }) {
-                    $dnOriginal = $obj.DistinguishedName
-                    $partes = $dnOriginal.Split(",") | Where-Object { $_ -like "OU=*" }
-                    $rutaActual = $dominioRaiz
-                    
-                    for ($i = $partes.Count - 1; $i -ge 0; $i--) {
-                        $ouNombre = $partes[$i].ToString().Replace("OU=", "")
-                        if (-not (Get-ADOrganizationalUnit -Filter "Name -eq '$ouNombre'" -SearchBase $rutaActual -SearchScope OneLevel)) {
-                            New-ADOrganizationalUnit -Name $ouNombre -Path $rutaActual
-                            Write-Host "[OK] Carpeta creada: $ouNombre" -ForegroundColor Green
-                        }
-                        $rutaActual = "OU=$ouNombre,$rutaActual"
+                # --- PASO 1: Restaurar Unidades Organizativas (OUs) ---
+                Write-Host "[1/4] Restaurando Unidades Organizativas..." -ForegroundColor White
+                $datos | Where-Object { $_.ObjectClass -eq "organizationalUnit" } | ForEach-Object {
+                    if (-not (Get-ADOrganizationalUnit -Filter "DistinguishedName -eq '$($_.DistinguishedName)'" -ErrorAction SilentlyContinue)) {
+                        # Extraemos el nombre y la ruta superior
+                        $nombre = $_.Name
+                        $padreDN = $_.DistinguishedName -replace "^OU=[^,]+,",""
+                        try {
+                            New-ADOrganizationalUnit -Name $nombre -Path $padreDN -ErrorAction SilentlyContinue
+                            Write-Host "  [OK] OU Creada: $nombre" -ForegroundColor Gray
+                        } catch { }
                     }
                 }
 
-                # PASO 2: Crear Grupos de Seguridad
-                # Es vital que existan antes que los usuarios para que no haya errores de membresia
-                foreach ($obj in $datos | Where-Object { $_.ObjectClass -eq "group" }) {
-                    $nombre = $obj.Name
-                    if (-not (Get-ADGroup -Filter "Name -eq '$nombre'")) {
-                        $dnOriginal = $obj.DistinguishedName
-                        $padreDN = $dnOriginal.Substring($dnOriginal.IndexOf(",") + 1)
+                # --- PASO 2: Restaurar Grupos ---
+                Write-Host "[2/4] Restaurando Grupos de Seguridad..." -ForegroundColor White
+                $datos | Where-Object { $_.ObjectClass -eq "group" } | ForEach-Object {
+                    if (-not (Get-ADGroup -Filter "DistinguishedName -eq '$($_.DistinguishedName)'" -ErrorAction SilentlyContinue)) {
+                        $padreDN = $_.DistinguishedName -replace "^CN=[^,]+,",""
+                        New-ADGroup -Name $_.Name -SamAccountName $_.SamAccountName -GroupScope Global -Path $padreDN -ErrorAction SilentlyContinue
+                        Write-Host "  [OK] Grupo Creado: $($_.Name)" -ForegroundColor Gray
+                    }
+                }
+
+                # --- PASO 3: Restaurar Usuarios y sus Membresías ---
+                Write-Host "[3/4] Restaurando Usuarios y Grupos..." -ForegroundColor White
+                $datos | Where-Object { $_.ObjectClass -eq "user" } | ForEach-Object {
+                    $user = $_
+                    if (-not (Get-ADUser -Filter "SamAccountName -eq '$($user.SamAccountName)'" -ErrorAction SilentlyContinue)) {
+                        $padreDN = $user.DistinguishedName -replace "^CN=[^,]+,",""
+                        $pass = ConvertTo-SecureString "Password123!" -AsPlainText -Force
                         
-                        New-ADGroup -Name $nombre -SamAccountName $nombre -GroupScope Global -GroupCategory Security -Path $padreDN
-                        Write-Host "[OK] Grupo restaurado: $nombre" -ForegroundColor Yellow
+                        New-ADUser -Name $user.Name -SamAccountName $user.SamAccountName -DisplayName $user.DisplayName `
+                                   -Path $padreDN -AccountPassword $pass -Enabled $true -ErrorAction SilentlyContinue
+                        Write-Host "  [OK] Usuario: $($user.SamAccountName)" -ForegroundColor Gray
                     }
-                }
 
-                # PASO 3: Crear Usuarios y Equipos
-                foreach ($obj in $datos | Where-Object { $_.ObjectClass -eq "user" -or $_.ObjectClass -eq "computer" }) {
-                    $nombre = $obj.Name
-                    $dnOriginal = $obj.DistinguishedName
-                    $padreDN = $dnOriginal.Substring($dnOriginal.IndexOf(",") + 1)
-
-                    # Logica para USUARIOS
-                    if ($obj.ObjectClass -eq "user" -and $obj.SamAccountName -ne "Administrator") {
-                        if (-not (Get-ADUser -Filter "SamAccountName -eq '$($obj.SamAccountName)'")) {
-                            $pass = ConvertTo-SecureString "Password2026!" -AsPlainText -Force
-                            New-ADUser -Name $nombre -SamAccountName $obj.SamAccountName -AccountPassword $pass -Enabled $true -Path $padreDN
-                            Write-Host "[OK] Usuario restaurado: $nombre" -ForegroundColor White
-                        }
-                    }
-                    # Logica para EQUIPOS
-                    elseif ($obj.ObjectClass -eq "computer") {
-                        if (-not (Get-ADComputer -Filter "Name -eq '$nombre'")) {
-                            # Pausa de medio segundo para que el AD asimile las OUs creadas
-                            Start-Sleep -Milliseconds 500
+                    # RESTAURAR GRUPOS (Membresía)
+                    if ($user.Groups) {
+                        $listaGrupos = $user.Groups -split ';'
+                        foreach ($gDN in $listaGrupos) {
                             try {
-                                New-ADComputer -Name $nombre -SamAccountName "$nombre$" -Path $padreDN -ErrorAction SilentlyContinue
-                                Write-Host "[OK] Equipo restaurado: $nombre" -ForegroundColor Gray
-                            } catch {
-                                # Si la OU falla, lo crea en la ruta por defecto para no perder el equipo
-                                New-ADComputer -Name $nombre -SamAccountName "$nombre$" -ErrorAction SilentlyContinue
-                                Write-Host "[!] Equipo $nombre creado en contenedor por defecto" -ForegroundColor Magenta
-                            }
+                                Add-ADGroupMember -Identity $gDN -Members $user.SamAccountName -ErrorAction SilentlyContinue
+                            } catch { }
                         }
                     }
                 }
+
+                # --- PASO 4: Restaurar Equipos ---
+                Write-Host "[4/4] Restaurando Equipos..." -ForegroundColor White
+                $datos | Where-Object { $_.ObjectClass -eq "computer" } | ForEach-Object {
+                    if (-not (Get-ADComputer -Filter "Name -eq '$($_.Name)'" -ErrorAction SilentlyContinue)) {
+                        $padreDN = $_.DistinguishedName -replace "^CN=[^,]+,",""
+                        New-ADComputer -Name $_.Name -SamAccountName "$($_.Name)$" -Path $padreDN -Enabled $true -ErrorAction SilentlyContinue
+                        Write-Host "  [OK] Equipo: $($_.Name)" -ForegroundColor Gray
+                    }
+                }
+
             } else {
-                Write-Host "No se encontro ningun archivo de backup CSV." -ForegroundColor Red
+                Write-Host "No se encontró ningún archivo de backup (.csv) en la carpeta del script." -ForegroundColor Red
             }
-            Write-Host "--- PROCESO DE RESTAURACION FINALIZADO ---" -ForegroundColor Cyan
+            Write-Host "--- RESTAURACION FINALIZADA ---" -ForegroundColor Cyan
             Pause
         }
         "13"{
