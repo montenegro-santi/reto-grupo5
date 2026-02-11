@@ -75,29 +75,39 @@ do {
             Pause
         }
        "4" {
-        Write-Host "--- DESPLIEGUE TOTAL DE INFRAESTRUCTURA ---" -ForegroundColor Cyan
+        Write-Host "--- DESPLIEGUE TOTAL: USUARIOS, GRUPOS Y EQUIPOS ---" -ForegroundColor Cyan
         $dominioDN = (Get-ADDomain).DistinguishedName
+        $upnSuffix = "@" + (Get-ADDomain).DnsRoot
         $departamentos = @("Finanzas", "IT", "RRHH", "Soporte", "Ventas")
 
-        # 1. Crear estructura base (Empresa > Equipos)
-        $rutaEmpresa = "OU=Empresa,$dominioDN"
-        if (-not (Get-ADOrganizationalUnit -Filter "DistinguishedName -eq '$rutaEmpresa'" -ErrorAction SilentlyContinue)) {
-            New-ADOrganizationalUnit -Name "Empresa" -Path $dominioDN
-            Write-Host "[+] Estructura Empresa creada" -ForegroundColor Green
+        # PASO 1: Asegurar Estructura Base (Empresa > Usuarios/Equipos/Grupos)
+        $bases = @("Empresa", "Equipos", "Usuarios", "Grupos")
+        foreach ($b in $bases) {
+            $target = if ($b -eq "Empresa") { "OU=Empresa,$dominioDN" } else { "OU=$b,OU=Empresa,$dominioDN" }
+            $parent = if ($b -eq "Empresa") { $dominioDN } else { "OU=Empresa,$dominioDN" }
+            if (-not (Get-ADOrganizationalUnit -Filter "DistinguishedName -eq '$target'" -ErrorAction SilentlyContinue)) {
+                New-ADOrganizationalUnit -Name $b -Path $parent
+                Write-Host "[+] Estructura base creada: $b" -ForegroundColor Green
+            }
         }
 
-        $rutaEquiposBase = "OU=Equipos,$rutaEmpresa"
-        if (-not (Get-ADOrganizationalUnit -Filter "DistinguishedName -eq '$rutaEquiposBase'" -ErrorAction SilentlyContinue)) {
-            New-ADOrganizationalUnit -Name "Equipos" -Path $rutaEmpresa
-            Write-Host "[+] Estructura Equipos creada" -ForegroundColor Green
+        # PASO 2: Crear Grupos y Usuarios (Llamando a tu script existente)
+        # Esto usará tu archivo 'usuarios.csv' para poblar la OU Usuarios
+        Write-Host "`n[2/3] Creando Usuarios y Grupos desde CSV..." -ForegroundColor Yellow
+        if (Test-Path ".\Creausuarios.ps1") {
+            .\Creausuarios.ps1 -CsvPath ".\usuarios.csv" -DomainDN $dominioDN -UpnSuffix $upnSuffix
+        } else {
+            Write-Host " [!] No se encontró Creausuarios.ps1, saltando paso." -ForegroundColor Red
         }
 
-        # 2. Crear ramas y equipos
+        # PASO 3: Crear Ramas de Equipos y desplegar 4 PCs por departamento
+        Write-Host "`n[3/3] Desplegando 5 Ramas de Equipos..." -ForegroundColor Yellow
+        $rutaEquiposBase = "OU=Equipos,OU=Empresa,$dominioDN"
+
         foreach ($dep in $departamentos) {
             $pathDep = "OU=$dep,$rutaEquiposBase"
-            Write-Host " >> Procesando rama $dep" -ForegroundColor Yellow
+            Write-Host " >> Rama: $dep" -ForegroundColor White
 
-            # Crear OU del departamento si no existe
             if (-not (Get-ADOrganizationalUnit -Filter "DistinguishedName -eq '$pathDep'" -ErrorAction SilentlyContinue)) {
                 New-ADOrganizationalUnit -Name $dep -Path $rutaEquiposBase
                 Start-Sleep -Milliseconds 200
@@ -111,16 +121,17 @@ do {
                     $objPC = Get-ADComputer -Filter "Name -eq '$nombrePC'" -ErrorAction SilentlyContinue
                     if (-not $objPC) {
                         New-ADComputer -Name $nombrePC -SamAccountName "${nombrePC}$" -Path $pathDep -Enabled $true
-                        Write-Host "    [OK] $nombrePC en $dep" -ForegroundColor Gray
-                    } elseif ($objPC.DistinguishedName -notlike "*$pathDep*") {
-                        Move-ADObject -Identity $objPC.DistinguishedName -TargetPath $pathDep
-                        Write-Host "    [MOVIDO] $nombrePC a $dep" -ForegroundColor Blue
+                        Write-Host "    [OK] $nombrePC creado" -ForegroundColor Gray
+                    } else {
+                        Move-ADObject -Identity $objPC.DistinguishedName -TargetPath $pathDep -ErrorAction SilentlyContinue
+                        Write-Host "    [OK] $nombrePC reubicado" -ForegroundColor Blue
                     }
                 } catch {
-                    Write-Host "    [!] Error en objeto $nombrePC" -ForegroundColor Red
+                    Write-Host "    [!] Error en $nombrePC" -ForegroundColor Red
                 }
             }
         }
+        Write-Host "`n--- PROCESO FULL AUTO FINALIZADO ---" -ForegroundColor Green
         Pause
     }
         "5" {
