@@ -89,12 +89,8 @@ do {
             Ejecutar-Rollback
             Pause 
         }
-        "7" { 
-            Write-Host "Saliendo del gestor..." -ForegroundColor Gray
-            break 
-        }
-        "8"{
-            Write-Host "--- ESTADO DE SALUD DEL SERVIDOR ---" -ForegroundColor Cyan
+        "7"{ 
+           Write-Host "--- ESTADO DE SALUD DEL SERVIDOR ---" -ForegroundColor Cyan
             $servicios = @("dns", "adws", "ntds", "kdc")
             foreach ($s in $servicios) {
             $status = Get-Service $s
@@ -105,6 +101,10 @@ do {
             $disk = Get-PSDrive C
             Write-Host "$([Math]::Round($disk.Free/1GB, 2)) GB libres" -ForegroundColor Yellow
             Pause
+            }
+        "8"{
+            Write-Host "Saliendo del gestor..." -ForegroundColor Gray
+            break 
         }
         Default { 
             Write-Host "Opci�n no v�lida, intenta de nuevo." -ForegroundColor Red
