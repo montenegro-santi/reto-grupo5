@@ -79,17 +79,17 @@ do {
         $dominioDN = (Get-ADDomain).DistinguishedName
         $departamentos = @("Finanzas", "IT", "RRHH", "Soporte", "Ventas")
 
-        # 1. Crear jerarquía base (Empresa > Equipos)
+        # 1. Crear estructura base (Empresa > Equipos)
         $rutaEmpresa = "OU=Empresa,$dominioDN"
         if (-not (Get-ADOrganizationalUnit -Filter "DistinguishedName -eq '$rutaEmpresa'" -ErrorAction SilentlyContinue)) {
             New-ADOrganizationalUnit -Name "Empresa" -Path $dominioDN
-            Write-Host "[+] Estructura base Empresa creada" -ForegroundColor Green
+            Write-Host "[+] Estructura Empresa creada" -ForegroundColor Green
         }
 
         $rutaEquiposBase = "OU=Equipos,$rutaEmpresa"
         if (-not (Get-ADOrganizationalUnit -Filter "DistinguishedName -eq '$rutaEquiposBase'" -ErrorAction SilentlyContinue)) {
             New-ADOrganizationalUnit -Name "Equipos" -Path $rutaEmpresa
-            Write-Host "[+] Estructura base Equipos creada" -ForegroundColor Green
+            Write-Host "[+] Estructura Equipos creada" -ForegroundColor Green
         }
 
         # 2. Crear ramas y equipos
@@ -97,6 +97,7 @@ do {
             $pathDep = "OU=$dep,$rutaEquiposBase"
             Write-Host " >> Procesando rama $dep" -ForegroundColor Yellow
 
+            # Crear OU del departamento si no existe
             if (-not (Get-ADOrganizationalUnit -Filter "DistinguishedName -eq '$pathDep'" -ErrorAction SilentlyContinue)) {
                 New-ADOrganizationalUnit -Name $dep -Path $rutaEquiposBase
                 Start-Sleep -Milliseconds 200
@@ -110,7 +111,7 @@ do {
                     $objPC = Get-ADComputer -Filter "Name -eq '$nombrePC'" -ErrorAction SilentlyContinue
                     if (-not $objPC) {
                         New-ADComputer -Name $nombrePC -SamAccountName "${nombrePC}$" -Path $pathDep -Enabled $true
-                        Write-Host "    [NUEVO] $nombrePC en $dep" -ForegroundColor Gray
+                        Write-Host "    [OK] $nombrePC en $dep" -ForegroundColor Gray
                     } elseif ($objPC.DistinguishedName -notlike "*$pathDep*") {
                         Move-ADObject -Identity $objPC.DistinguishedName -TargetPath $pathDep
                         Write-Host "    [MOVIDO] $nombrePC a $dep" -ForegroundColor Blue
@@ -235,7 +236,7 @@ do {
                 $datos = Import-Csv -Path $backup.FullName -Encoding UTF8
                 $dominioDN = (Get-ADDomain).DistinguishedName
 
-                # Crear OUs base para evitar errores de ruta no encontrada
+                # Paso 0: Asegurar carpetas raiz (Empresa, Equipos, Usuarios, Grupos)
                 $bases = @("Empresa", "Equipos", "Usuarios", "Grupos")
                 foreach ($b in $bases) {
                     $target = if ($b -eq "Empresa") { "OU=Empresa,$dominioDN" } else { "OU=$b,OU=Empresa,$dominioDN" }
@@ -245,10 +246,11 @@ do {
                     }
                 }
 
-                # Restaurar todo lo demás
+                # Paso 1: Restaurar OUs, Usuarios y Equipos
                 $datos | ForEach-Object {
                     $item = $_
                     $clase = $item.ObjectClass
+                    
                     if ($clase -eq "organizationalUnit" -and $item.Name -notin $bases) {
                         $parentOU = $item.DistinguishedName -replace "^OU=[^,]+,",""
                         if (-not (Get-ADOrganizationalUnit -Filter "DistinguishedName -eq '$($item.DistinguishedName)'" -ErrorAction SilentlyContinue)) {
@@ -270,6 +272,8 @@ do {
                         }
                     }
                 }
+            } else {
+                Write-Host "Error No hay archivos de backup" -ForegroundColor Red
             }
             Write-Host "Proceso terminado" -ForegroundColor Green
             Pause
