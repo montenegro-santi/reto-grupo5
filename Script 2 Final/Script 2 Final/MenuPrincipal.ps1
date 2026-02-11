@@ -48,7 +48,9 @@ function Mostrar-Menu {
     Write-Host "5. Ver Archivos de LOG"
     Write-Host "6. ROLLBACK (Limpiar Dominio)" -ForegroundColor Red
     Write-Host "7. Ver salud de los servicios (DNS/AD)"
-    Write-Host "8. Salir"
+    Write-Host "8. Reporte salud del servidor (HTML)"
+    Write-Host "9. Listar usuarios inactivos (30 días)"
+    Write-Host "10. Salir"
     Write-Host "=============================================="
 }
 
