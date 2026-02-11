@@ -75,12 +75,12 @@ do {
             Pause
         }
        "4" {
-        Write-Host "--- AUTOMATIZACION TOTAL: 5 DEPARTAMENTOS X 4 EQUIPOS ---" -ForegroundColor Cyan
+        Write-Host "--- AUTOMATIZACION TOTAL: 4 EQUIPOS POR RAMA ---" -ForegroundColor Cyan
         $dominioDN = (Get-ADDomain).DistinguishedName
         $upnSuffix = (Get-ADDomain).DNSRoot
         $departamentos = @("Finanzas", "IT", "RRHH", "Soporte", "Ventas")
 
-        # PASO 1: Asegurar Estructura de OUs
+        # PASO 1: Crear Estructura de Carpetas (OUs)
         $rutaEmpresa = "OU=Empresa,$dominioDN"
         if (-not (Get-ADOrganizationalUnit -Filter "DistinguishedName -eq '$rutaEmpresa'" -ErrorAction SilentlyContinue)) {
             New-ADOrganizationalUnit -Name "Empresa" -Path $dominioDN
@@ -97,44 +97,37 @@ do {
             $pathDep = "OU=$dep,$rutaEquipos"
             if (-not (Get-ADOrganizationalUnit -Filter "DistinguishedName -eq '$pathDep'" -ErrorAction SilentlyContinue)) {
                 New-ADOrganizationalUnit -Name $dep -Path $rutaEquipos
-                Write-Host "  [+] Creada carpeta de equipos: $dep" -ForegroundColor Green
             }
         }
 
-        # PASO 2: Usuarios y Grupos (Llamada al script secundario)
+        # PASO 2: Usuarios y Grupos (Creausuarios.ps1)
         if (Test-Path ".\Creausuarios.ps1") {
             .\Creausuarios.ps1 -CsvPath ".\usuarios.csv" -DomainDN $dominioDN -UpnSuffix $upnSuffix -Delimiter ";"
         }
 
-        # PASO 3: Generación de 4 PCs por cada una de las 5 Ramas
-        Write-Host "[3/3] Creando 20 equipos en total..." -ForegroundColor Yellow
-        Start-Sleep -Seconds 2 # Pausa de seguridad para sincronización del AD
-
+        # PASO 3: Generar 4 Equipos por Departamento (Lógica Multi-Equipo)
+        Write-Host "[3/3] Generando 4 PCs por cada unidad organizativa..." -ForegroundColor Yellow
         foreach ($dep in $departamentos) {
             $destinoPC = "OU=$dep,$rutaEquipos"
             
-            # Verificación: ¿Existe la carpeta realmente?
-            if (Get-ADOrganizationalUnit -Identity $destinoPC -ErrorAction SilentlyContinue) {
-                # Prefijo seguro para nombres cortos como "IT" (evita el error de image_c5b6d5.jpg)
-                $prefijo = if ($dep.Length -ge 3) { $dep.Substring(0,3).ToUpper() } else { $dep.ToUpper() }
+            # Arreglo para el error de Substring: si es corto, usa el nombre entero
+            $prefijo = if ($dep.Length -ge 3) { $dep.Substring(0,3).ToUpper() } else { $dep.ToUpper() }
 
-                for ($i = 1; $i -le 4; $i++) {
-                    $nombrePC = "${prefijo}-PC0$i"
-                    
-                    if (-not (Get-ADComputer -Filter "Name -eq '$nombrePC'" -ErrorAction SilentlyContinue)) {
-                        try {
-                            New-ADComputer -Name $nombrePC -SamAccountName "$nombrePC$" -Path $destinoPC -Enabled $true
-                            Write-Host "    [OK] Creado: $nombrePC en $dep" -ForegroundColor Gray
-                        } catch {
-                            Write-Host "    [!] Error en $nombrePC: $($_.Exception.Message)" -ForegroundColor Red
-                        }
+            for ($i = 1; $i -le 4; $i++) {
+                $nombrePC = "${prefijo}-PC0$i" # Genera PC01, PC02, PC03, PC04
+                
+                try {
+                    if (-not (Get-ADComputer -Filter "Name -eq '$nombrePC'")) {
+                        # Creamos el equipo en su ruta específica (NO en Computers general)
+                        New-ADComputer -Name $nombrePC -SamAccountName "$nombrePC$" -Path $destinoPC -Enabled $true
+                        Write-Host "  [OK] Creado: $nombrePC en $dep" -ForegroundColor Gray
                     }
+                } catch {
+                    Write-Host "  [!] Error al crear ${nombrePC}: $($_.Exception.Message)" -ForegroundColor Red
                 }
-            } else {
-                Write-Host "  [!] Advertencia: La carpeta $dep no esta lista aun." -ForegroundColor Red
             }
         }
-        Write-Host "--- PROCESO FINALIZADO CON EXITO ---" -ForegroundColor Green
+        Write-Host "--- AUTOMATIZACION FINALIZADA ---" -ForegroundColor Green
         Pause
     }
         "5" {
