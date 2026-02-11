@@ -75,38 +75,38 @@ do {
             Pause
         }
        "4" {
-        Write-Host "--- DESPLIEGUE TOTAL: USUARIOS, GRUPOS Y EQUIPOS ---" -ForegroundColor Cyan
+        Write-Host "--- DESPLIEGUE TOTAL: ESTRUCTURA DE USUARIOS Y EQUIPOS ---" -ForegroundColor Cyan
         $dominioDN = (Get-ADDomain).DistinguishedName
         $upnSuffix = "@" + (Get-ADDomain).DnsRoot
         $departamentos = @("Finanzas", "IT", "RRHH", "Soporte", "Ventas")
 
-        # PASO 1: Asegurar Estructura Base (Empresa > Usuarios/Equipos/Grupos)
-        $bases = @("Empresa", "Equipos", "Usuarios", "Grupos")
+        # PASO 1: Asegurar Estructura Base (Solo Empresa, Equipos y Usuarios)
+        $bases = @("Empresa", "Equipos", "Usuarios")
         foreach ($b in $bases) {
             $target = if ($b -eq "Empresa") { "OU=Empresa,$dominioDN" } else { "OU=$b,OU=Empresa,$dominioDN" }
             $parent = if ($b -eq "Empresa") { $dominioDN } else { "OU=Empresa,$dominioDN" }
             if (-not (Get-ADOrganizationalUnit -Filter "DistinguishedName -eq '$target'" -ErrorAction SilentlyContinue)) {
                 New-ADOrganizationalUnit -Name $b -Path $parent
-                Write-Host "[+] Estructura base creada: $b" -ForegroundColor Green
+                Write-Host "[+] Estructura base creada $b" -ForegroundColor Green
             }
         }
 
-        # PASO 2: Crear Grupos y Usuarios (Llamando a tu script existente)
-        # Esto usará tu archivo 'usuarios.csv' para poblar la OU Usuarios
-        Write-Host "`n[2/3] Creando Usuarios y Grupos desde CSV..." -ForegroundColor Yellow
+        # PASO 2: Crear Usuarios y Grupos (Integración con tu script)
+        Write-Host "`n[2/3] Procesando Usuarios y Grupos..." -ForegroundColor Yellow
         if (Test-Path ".\Creausuarios.ps1") {
+            # El script de usuarios se encargará de poner cada cosa en su sitio dentro de OU=Usuarios
             .\Creausuarios.ps1 -CsvPath ".\usuarios.csv" -DomainDN $dominioDN -UpnSuffix $upnSuffix
         } else {
-            Write-Host " [!] No se encontró Creausuarios.ps1, saltando paso." -ForegroundColor Red
+            Write-Host " [!] Error Creausuarios.ps1 no encontrado" -ForegroundColor Red
         }
 
-        # PASO 3: Crear Ramas de Equipos y desplegar 4 PCs por departamento
-        Write-Host "`n[3/3] Desplegando 5 Ramas de Equipos..." -ForegroundColor Yellow
+        # PASO 3: Desplegar 5 Ramas de Equipos
+        Write-Host "`n[3/3] Desplegando ramas de Equipos..." -ForegroundColor Yellow
         $rutaEquiposBase = "OU=Equipos,OU=Empresa,$dominioDN"
 
         foreach ($dep in $departamentos) {
             $pathDep = "OU=$dep,$rutaEquiposBase"
-            Write-Host " >> Rama: $dep" -ForegroundColor White
+            Write-Host " >> Configurando rama $dep" -ForegroundColor White
 
             if (-not (Get-ADOrganizationalUnit -Filter "DistinguishedName -eq '$pathDep'" -ErrorAction SilentlyContinue)) {
                 New-ADOrganizationalUnit -Name $dep -Path $rutaEquiposBase
@@ -124,14 +124,14 @@ do {
                         Write-Host "    [OK] $nombrePC creado" -ForegroundColor Gray
                     } else {
                         Move-ADObject -Identity $objPC.DistinguishedName -TargetPath $pathDep -ErrorAction SilentlyContinue
-                        Write-Host "    [OK] $nombrePC reubicado" -ForegroundColor Blue
+                        Write-Host "    [OK] $nombrePC verificado" -ForegroundColor Gray
                     }
                 } catch {
                     Write-Host "    [!] Error en $nombrePC" -ForegroundColor Red
                 }
             }
         }
-        Write-Host "`n--- PROCESO FULL AUTO FINALIZADO ---" -ForegroundColor Green
+        Write-Host "`n--- PROCESO COMPLETADO ---" -ForegroundColor Green
         Pause
     }
         "5" {
