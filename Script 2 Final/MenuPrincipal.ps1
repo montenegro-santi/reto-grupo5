@@ -1,7 +1,7 @@
 #Requires -Modules ActiveDirectory
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 
-# --- DETECCI√ìN AUTOM√ÅTICA DEL DOMINIO ---
+# --- DETECCI”N AUTOM¡TICA DEL DOMINIO ---
 try {
     $currentDomain = Get-ADDomain
     $domainDN = $currentDomain.DistinguishedName      # Detecta "DC=Dominio, DC=Local"
@@ -13,33 +13,33 @@ try {
     exit
 }
 function Ejecutar-Rollback {
-    # Definimos la ruta e la OU principal bas√°ndonos en el dominio detectado
+    # Definimos la ruta e la OU principal bas·ndonos en el dominio detectado
     $targetOU = "OU=Empresa,$domainDN"
     
     # Verificamos si la OU existe antes de intentar borrar
     if (Get-ADOrganizationalUnit -Filter "DistinguishedName -eq '$targetOU'") {
-        $confirm = Read-Host "ADVERTENCIA: Se borrar√°n TODOS los usuarios y grupos de '$targetOU'. ¬øProceder? (S/N)"
+        $confirm = Read-Host "ADVERTENCIA: Se borrar·n TODOS los usuarios y grupos de '$targetOU'. øProceder? (S/N)"
         if ($confirm -eq "S" -or $confirm -eq "s") {
             Write-Host "Limpiando infraestructura..." -ForegroundColor Yellow
             
-            # 1. Desbloqueamos la protecci√≥n contra borrado accidental de la OU y sus subcarpetas
+            # 1. Desbloqueamos la protecciÛn contra borrado accidental de la OU y sus subcarpetas
             Get-ADOrganizationalUnit -Filter "DistinguishedName -like '*OU=Empresa,$domainDN'" | 
                 Set-ADObject -ProtectedFromAccidentalDeletion $false
             
-            # 2. Borramos la OU ra√≠z y todo lo que tiene dentro (Recursivo)
+            # 2. Borramos la OU raÌz y todo lo que tiene dentro (Recursivo)
             Remove-ADOrganizationalUnit -Identity $targetOU -Recursive -Confirm:$false
             
-            Write-Host "Rollback completado. El dominio est√° limpio." -ForegroundColor Green
+            Write-Host "Rollback completado. El dominio est· limpio." -ForegroundColor Green
         }
     } else {
-        Write-Host "No se encontr√≥ la carpeta 'Empresa'. El dominio ya est√° limpio." -ForegroundColor Gray
+        Write-Host "No se encontrÛ la carpeta 'Empresa'. El dominio ya est· limpio." -ForegroundColor Gray
     }
     }
 
 function Mostrar-Menu {
     Clear-Host
     Write-Host "==============================================" -ForegroundColor Green
-    Write-Host "   GESTOR AUTOM√ÅTICO PARA: $dominioNombre " -ForegroundColor Green
+    Write-Host "   GESTOR AUTOM¡TICO PARA: $dominioNombre " -ForegroundColor Green
     Write-Host "==============================================" -ForegroundColor Green
     Write-Host "1. Crear Usuarios y Grupos"
     Write-Host "2. Crear Objetos de Equipo"
@@ -53,7 +53,7 @@ function Mostrar-Menu {
 
 do {
     Mostrar-Menu
-    $opcion = Read-Host "Selecciona una opci√≥n"
+    $opcion = Read-Host "Selecciona una opciÛn"
 
     switch ($opcion) {
         "1" { 
@@ -69,11 +69,11 @@ do {
             Pause
         }
         "4" {
-            Write-Host "Iniciando automatizaci√≥n total en $dominioNombre..." -ForegroundColor Yellow
+            Write-Host "Iniciando automatizaciÛn total en $dominioNombre..." -ForegroundColor Yellow
             .\Creausuarios.ps1 -CsvPath ".\usuarios.csv" -DomainDN $domainDN -UpnSuffix $upnSuffix
             .\Computers.ps1 -CsvPath ".\equipos.csv"
             .\moverequipos.ps1
-            Write-Host "¬°Dominio configurado con √©xito!" -ForegroundColor Green
+            Write-Host "°Dominio configurado con Èxito!" -ForegroundColor Green
             Pause
         }
         "5" {
@@ -84,7 +84,7 @@ do {
             Pause
         }
         "6" { 
-            # Aqu√≠ es donde llamamos a la funci√≥n que ten√≠a la raya debajo
+            # AquÌ es donde llamamos a la funciÛn que tenÌa la raya debajo
             Ejecutar-Rollback
             Pause 
         }
@@ -93,7 +93,7 @@ do {
             break 
         }
         Default { 
-            Write-Host "Opci√≥n no v√°lida, intenta de nuevo." -ForegroundColor Red
+            Write-Host "OpciÛn no v·lida, intenta de nuevo." -ForegroundColor Red
             Start-Sleep -Seconds 1
         }
     }
