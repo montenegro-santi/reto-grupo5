@@ -84,7 +84,7 @@ do {
             Pause
         }
         "6" { 
-            # Aqu� es donde llamamos a la funci�n que ten�a la raya debajo
+            # Aqu� es donde llamamos a la funci�n que ten�a la raya debajoa
             Ejecutar-Rollback
             Pause 
         }
