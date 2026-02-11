@@ -99,7 +99,7 @@ do {
                     $color = if ($status.Status -eq "Running") { "Green" } else { "Red" }
                     Write-Host "$($status.DisplayName): [$($status.Status)]" -ForegroundColor $color
                 } else {
-                    Write-Host "Servicio $s: [NO ENCONTRADO]" -ForegroundColor Yellow
+                    Write-Host "Servicio ${s}: [NO ENCONTRADO]" -ForegroundColor Yellow
                 }
             }
             Write-Host "-------------------------------------"
