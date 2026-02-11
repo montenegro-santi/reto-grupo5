@@ -186,47 +186,50 @@ do {
     if ($archivo) {
         $datos = Import-Csv -Path $archivo.FullName -Encoding UTF8
         
-        # 1. FUNCIÓN PARA ASEGURAR QUE LA RUTA PADRE EXISTE
+        # 1. FUNCION DE JERARQUIA SIN ERRORES
         function Crear-RutaJerarquica($dn) {
+            # Extraemos las partes que son OU
             $partes = $dn.Split(",") | Where-Object { $_ -like "OU=*" }
             $rutaActual = (Get-ADDomain).DistinguishedName
             
-            # Recorremos la ruta de derecha a izquierda para crear las OUs
+            # Recorremos de derecha a izquierda (de Empresa hacia adentro)
             for ($i = $partes.Count - 1; $i -ge 0; $i--) {
-                $ouNombre = $partes[$i].Replace("OU=", "")
+                $ouNombre = $partes[$i].ToString().Replace("OU=", "")
                 $nuevaRuta = "OU=$ouNombre,$rutaActual"
+                
                 if (-not (Get-ADOrganizationalUnit -Filter "Name -eq '$ouNombre'" -SearchBase $rutaActual -SearchScope OneLevel)) {
                     New-ADOrganizationalUnit -Name $ouNombre -Path $rutaActual
-                    Write-Host "[OK] Creada jerarquia: $ouNombre" -ForegroundColor Green
+                    Write-Host "[OK] Estructura creada: $ouNombre" -ForegroundColor Green
                 }
                 $rutaActual = $nuevaRuta
             }
+            return $rutaActual
         }
 
         foreach ($obj in $datos) {
-            # Limpiamos tildes del nombre para evitar errores de caracteres raros
+            # Quitamos tildes del nombre para evitar caracteres raros en el AD
             $nombreLimpio = [Text.Encoding]::ASCII.GetString([Text.Encoding]::GetEncoding("Cyrillic").GetBytes($obj.Name))
             
             if ($obj.ObjectClass -eq "organizationalUnit") {
                 Crear-RutaJerarquica $obj.DistinguishedName
             }
-            elseif ($obj.ObjectClass -eq "group") {
-                if (-not (Get-ADGroup -Filter "Name -eq '$nombreLimpio'")) {
-                    New-ADGroup -Name $nombreLimpio -GroupScope Global -Path (Get-ADDomain).DistinguishedName
-                    Write-Host "Grupo Restaurado: $nombreLimpio" -ForegroundColor Cyan
-                }
-            }
             elseif ($obj.ObjectClass -eq "user" -and $obj.SamAccountName -ne "Administrator") {
                 if (-not (Get-ADUser -Filter "SamAccountName -eq '$($obj.SamAccountName)'")) {
                     $pass = ConvertTo-SecureString "Password2026!" -AsPlainText -Force
-                    New-ADUser -Name $nombreLimpio -SamAccountName $obj.SamAccountName -AccountPassword $pass -Enabled $true
-                    Write-Host "Usuario Restaurado: $nombreLimpio" -ForegroundColor White
+                    # Calculamos la ruta padre para que se cree en su carpeta
+                    $posicionComa = $obj.DistinguishedName.IndexOf(",")
+                    $padreDN = $obj.DistinguishedName.Substring($posicionComa + 1)
+                    
+                    New-ADUser -Name $nombreLimpio -SamAccountName $obj.SamAccountName -AccountPassword $pass -Enabled $true -Path $padreDN
+                    Write-Host "Usuario Restaurado en su sitio: $nombreLimpio" -ForegroundColor White
                 }
             }
             elseif ($obj.ObjectClass -eq "computer") {
                 if (-not (Get-ADComputer -Filter "Name -eq '$nombreLimpio'")) {
-                    New-ADComputer -Name $nombreLimpio -SamAccountName "$nombreLimpio$"
-                    Write-Host "Equipo Restaurado: $nombreLimpio" -ForegroundColor Gray
+                    $posicionComa = $obj.DistinguishedName.IndexOf(",")
+                    $padreDN = $obj.DistinguishedName.Substring($posicionComa + 1)
+                    New-ADComputer -Name $nombreLimpio -SamAccountName "$nombreLimpio$" -Path $padreDN
+                    Write-Host "Equipo Restaurado en su sitio: $nombreLimpio" -ForegroundColor Gray
                 }
             }
         }
