@@ -81,33 +81,34 @@ do {
     $dominioDN = (Get-ADDomain).DistinguishedName
     $upnSuffix = (Get-ADDomain).DNSRoot
 
-    # 2. Ejecutar la creación de OUs, Usuarios y GRUPOS
-    # Llamamos a tu script Creausuarios.ps1 que ya tiene la lógica de grupos (BLOQUE 5)
+    # 2. Ejecutar creación de OUs, Usuarios y GRUPOS
     if (Test-Path ".\Creausuarios.ps1") {
-        Write-Host "[1/2] Creando estructura, grupos y usuarios..." -ForegroundColor Yellow
-        # IMPORTANTE: Usamos -ErrorAction SilentlyContinue para una consola limpia
+        Write-Host "[1/2] Creando estructura, grupos y usuarios en sus OUs..." -ForegroundColor Yellow
+        
+        # IMPORTANTE: Pasamos el DomainDN para que el script sepa dónde colgar las OUs y Grupos
         .\Creausuarios.ps1 -CsvPath ".\usuarios.csv" -DomainDN $dominioDN -UpnSuffix $upnSuffix -Delimiter ";"
     } else {
-        Write-Host "[!] ERROR: No se encuentra el archivo Creausuarios.ps1 en la carpeta." -ForegroundColor Red
+        Write-Host "[!] ERROR: No se encuentra Creausuarios.ps1" -ForegroundColor Red
     }
 
-    # 3. Crear y Organizar los Equipos (Integrado aquí para evitar errores de archivos faltantes)
-    Write-Host "[2/2] Creando y organizando objetos de equipo..." -ForegroundColor Yellow
+    # 3. Crear Equipos en sus carpetas correspondientes
+    Write-Host "[2/2] Creando objetos de equipo en sus departamentos..." -ForegroundColor Yellow
     $deps = @("Finanzas", "IT", "RRHH", "Soporte", "Ventas")
     
     foreach ($d in $deps) {
-        $rutaEquipos = "OU=$d,OU=Equipos,OU=Empresa,$dominioDN"
-        # Verificamos si la OU se creó en el paso anterior
-        if (Get-ADOrganizationalUnit -Filter "DistinguishedName -eq '$rutaEquipos'" -ErrorAction SilentlyContinue) {
+        # Definimos la ruta exacta: Empresa -> Equipos -> Departamento
+        $rutaDestinoEquipos = "OU=$d,OU=Equipos,OU=Empresa,$dominioDN"
+        
+        if (Get-ADOrganizationalUnit -Filter "DistinguishedName -eq '$rutaDestinoEquipos'" -ErrorAction SilentlyContinue) {
             $nombrePC = "$($d.Substring(0,3).ToUpper())-PC01"
             if (-not (Get-ADComputer -Filter "Name -eq '$nombrePC'")) {
-                New-ADComputer -Name $nombrePC -SamAccountName "$nombrePC$" -Path $rutaEquipos
-                Write-Host "[OK] Equipo creado: $nombrePC" -ForegroundColor Gray
+                New-ADComputer -Name $nombrePC -SamAccountName "$nombrePC$" -Path $rutaDestinoEquipos
+                Write-Host "[OK] Equipo $nombrePC creado en su OU" -ForegroundColor Gray
             }
         }
     }
 
-    Write-Host "--- AUTOMATIZACION FINALIZADA CON EXITO ---" -ForegroundColor Green
+    Write-Host "--- AUTOMATIZACION FINALIZADA ---" -ForegroundColor Green
     Pause
 }
         "5" {
