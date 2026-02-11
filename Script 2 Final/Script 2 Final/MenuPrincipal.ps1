@@ -106,12 +106,31 @@ do {
             Pause 
         }
         "8" { 
+            $reportPath = "$PSScriptRoot\Reporte_Salud.html"
+            $servicios = Get-Service dns, adws, ntds
+            $html = $servicios | Select-Object Name, DisplayName, Status | ConvertTo-Html -Title "Reporte de AD"
+            $html | Out-File $reportPath
+            Write-Host "Reporte generado en: $reportPath" -ForegroundColor Green
+            Pause
+        }
+        "9" {
+           Write-Host "Buscando usuarios inactivos (30 días)..." -ForegroundColor Yellow
+            $fecha = (Get-Date).AddDays(-30)
+            $inactivos = Get-ADUser -Filter "LastLogonDate -lt '$fecha'" -Properties LastLogonDate
+            if ($inactivos) {
+            $inactivos | Select-Object Name, SamAccountName, LastLogonDate | Format-Table
+            } else {
+                Write-Host "No hay usuarios inactivos. ¡Todos están trabajando!" -ForegroundColor Green
+            }
+            Pause
+            }   
+        "10" {
             Write-Host "Saliendo del gestor..." -ForegroundColor Gray
             return 
-        }
+            }
         Default { 
             Write-Host "Opción no válida, intenta de nuevo." -ForegroundColor Red
             Pause
         }
     }
-} while ($opcion -ne "8")
+} while ($opcion -ne "10")
