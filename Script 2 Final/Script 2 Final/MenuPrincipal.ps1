@@ -75,66 +75,37 @@ do {
             Pause
         }
        "4" {
-        Write-Host "--- AUTOMATIZACION TOTAL: 5 DEPARTAMENTOS X 4 EQUIPOS ---" -ForegroundColor Cyan
+        Write-Host "--- INICIANDO PROCESO DE AUTOMATIZACION TOTAL ---" -ForegroundColor Cyan
         
         $dominioDN = (Get-ADDomain).DistinguishedName
-        $upnSuffix = (Get-ADDomain).DNSRoot
-        # Definimos los 5 departamentos claramente
+        # Definición explícita de las 5 ramas
         $departamentos = @("Finanzas", "IT", "RRHH", "Soporte", "Ventas")
 
-        # 1. Crear la estructura de OUs si no existe
-        $rutaEmpresa = "OU=Empresa,$dominioDN"
-        if (-not (Get-ADOrganizationalUnit -Filter "DistinguishedName -eq '$rutaEmpresa'" -ErrorAction SilentlyContinue)) {
-            New-ADOrganizationalUnit -Name "Empresa" -Path $dominioDN
-        }
-
-        $rutaEquipos = "OU=Equipos,$rutaEmpresa"
-        if (-not (Get-ADOrganizationalUnit -Filter "DistinguishedName -eq '$rutaEquipos'" -ErrorAction SilentlyContinue)) {
-            New-ADOrganizationalUnit -Name "Equipos" -Path $rutaEmpresa
-        }
-
-        # 2. Crear las subcarpetas de cada departamento y sus equipos
         foreach ($dep in $departamentos) {
-            $pathDep = "OU=$dep,$rutaEquipos"
+            $pathDep = "OU=$dep,OU=Equipos,OU=Empresa,$dominioDN"
             
-            # Crear la OU del departamento si no existe
-            if (-not (Get-ADOrganizationalUnit -Filter "DistinguishedName -eq '$pathDep'" -ErrorAction SilentlyContinue)) {
-                New-ADOrganizationalUnit -Name $dep -Path $rutaEquipos
-                Write-Host "  [+] Creada OU: $dep" -ForegroundColor Green
-            }
-
-            # Lógica para el nombre del PC (Solución al error de Substring)
-            # Si el nombre tiene menos de 3 letras (como IT), usa el nombre completo.
+            # Solución al error de Substring: Si el nombre es corto (IT), usa el nombre completo
             if ($dep.Length -lt 3) {
                 $prefijo = $dep.ToUpper()
             } else {
                 $prefijo = $dep.Substring(0,3).ToUpper()
             }
 
-            # Crear 4 equipos para este departamento
+            # Bucle para crear los equipos en cada una de las 5 ramas
             for ($i = 1; $i -le 4; $i++) {
                 $nombrePC = "${prefijo}-PC0$i"
                 
                 try {
-                    # Verificar si el equipo ya existe antes de crearlo
                     if (-not (Get-ADComputer -Filter "Name -eq '$nombrePC'" -ErrorAction SilentlyContinue)) {
                         New-ADComputer -Name $nombrePC -SamAccountName "$nombrePC$" -Path $pathDep -Enabled $true
-                        Write-Host "    [OK] Equipo creado: $nombrePC en $dep" -ForegroundColor Gray
-                    } else {
-                        Write-Host "    [-] El equipo $nombrePC ya existe en el AD" -ForegroundColor Yellow
+                        Write-Host "    [OK] Equipo ${nombrePC} creado en ${dep}." -ForegroundColor Gray
                     }
                 } catch {
-                    Write-Host "    [!] Error al crear $nombrePC: $($_.Exception.Message)" -ForegroundColor Red
+                    # Uso de ${} para evitar el error de la captura image_c5aefc.png
+                    Write-Host "    [!] Error en PC ${nombrePC}: $($_.Exception.Message)" -ForegroundColor Red
                 }
             }
         }
-
-        # 3. Llamar al script de usuarios (opcional, si lo tienes configurado)
-        if (Test-Path ".\Creausuarios.ps1") {
-            Write-Host "--- Iniciando creación de usuarios ---" -ForegroundColor Cyan
-            .\Creausuarios.ps1 -CsvPath ".\usuarios.csv" -DomainDN $dominioDN -UpnSuffix $upnSuffix -Delimiter ";"
-        }
-
         Write-Host "--- PROCESO FINALIZADO ---" -ForegroundColor Green
         Pause
     }
