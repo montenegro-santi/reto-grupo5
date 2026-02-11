@@ -49,8 +49,10 @@ function Mostrar-Menu {
     Write-Host "6. ROLLBACK (Limpiar Dominio)" -ForegroundColor Red
     Write-Host "7. Ver salud de los servicios (DNS/AD)"
     Write-Host "8. Reporte salud del servidor (HTML)"
-    Write-Host "9. Listar usuarios inactivos (30 días)"
-    Write-Host "10. Salir"
+    Write-Host "9. Listar usuarios inactivos (30 dias)"
+    Write-Host "10. Crear copia de seguridad de usuarios"
+    Write-Host "11. Auditoria proactiva de seguridad"
+    Write-Host "12. Salir"
     Write-Host "=============================================="
 }
 
@@ -122,17 +124,60 @@ do {
             if ($inactivos) {
             $inactivos | Select-Object Name, SamAccountName, LastLogonDate | Format-Table
             } else {
-                Write-Host "No hay usuarios inactivos. ¡Todos están trabajando!" -ForegroundColor Green
+                Write-Host "No hay usuarios inactivos. ¡Todos estan trabajando!" -ForegroundColor Green
             }
             Pause
             }   
         "10" {
-            Write-Host "Saliendo del gestor..." -ForegroundColor Gray
-            return 
+             $fecha = Get-Date -Format "yyyyMMdd_HHmm"
+            Get-ADUser -Filter * | Export-Csv "$PSScriptRoot\Backup_Users_$fecha.csv"
+            Write-Host "Copia de seguridad de usuarios creada." -ForegroundColor Green
+            Pause
             }
+        "11"{
+            Write-Host "`n--- AUDITORÍA PROACTIVA DE SEGURIDAD ---" -ForegroundColor Cyan -BackgroundColor Black
+    
+            # 1. Detectar usuarios con contraseñas que NUNCA caducan (Riesgo de seguridad)
+            Write-Host "[!] Analizando contraseñas permanentes..." -ForegroundColor Yellow
+            $passNeverExpires = Get-ADUser -Filter 'PasswordNeverExpires -eq $true' | Select-Object -ExpandProperty SamAccountName
+            if ($passNeverExpires) {
+            Write-Host "    ALERTA: Se han encontrado usuarios con contraseñas que no caducan." -ForegroundColor Red
+            Write-Host "    Usuarios: $passNeverExpires"
+            $fix = Read-Host "¿Deseas corregirlo ahora y obligar a que caduquen? (S/N)"
+            if ($fix -eq "S") {
+            $passNeverExpires | Set-ADUser -PasswordNeverExpires $false
+            Write-Host "    [OK] Seguridad corregida." -ForegroundColor Green
+            }
+            } else {
+                Write-Host "    [OK] No hay contraseñas permanentes peligrosas." -ForegroundColor Green
+            }
+
+            # 2. Buscar grupos vacíos (Limpieza de AD)
+            Write-Host "`n[!] Buscando grupos sin miembros..." -ForegroundColor Yellow
+            $emptyGroups = Get-ADGroup -Filter * | Where-Object { -not (Get-ADGroupMember -Identity $_.DistinguishedName) }
+            if ($emptyGroups) {
+            Write-Host "    Se han encontrado $($emptyGroups.Count) grupos vacios." -ForegroundColor Cyan
+            $emptyGroups | Select-Object Name | Format-Table
+            }
+
+            # 3. Verificar si la Papelera de Reciclaje de AD está activa
+            Write-Host "[!] Verificando Papelera de Reciclaje de Active Directory..." -ForegroundColor Yellow
+            $features = Get-ADOptionalFeature -Filter 'Name -like "Recycle Bin Feature"'
+            if ($features.EnabledScopes) {
+            Write-Host "    [OK] La Papelera de Reciclaje está ACTIVA (Protección contra borrados accidentales)." -ForegroundColor Green
+            } else {
+                Write-Host "    [PELIGRO] La Papelera de Reciclaje está DESACTIVADA." -ForegroundColor Red
+            }
+
+            Pause
+            }
+        "12"{
+            Write-Host "Saliendo del gestor..." -ForegroundColor Gray
+            return
+        }
         Default { 
-            Write-Host "Opción no válida, intenta de nuevo." -ForegroundColor Red
+            Write-Host "Opcion no valida, intenta de nuevo." -ForegroundColor Red
             Pause
         }
     }
-} while ($opcion -ne "10")
+} while ($opcion -ne "12")
