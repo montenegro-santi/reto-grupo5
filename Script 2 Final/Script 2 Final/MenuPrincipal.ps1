@@ -74,46 +74,42 @@ do {
             .\moverequipos.ps1
             Pause
         }
-        "4" {
-    Write-Host "--- AUTOMATIZACION TOTAL CON PAUSAS DE SINCRONIZACION ---" -ForegroundColor Cyan
+       "4" {
+    Write-Host "--- AUTOMATIZACION TOTAL: VERSION ESTABLE ---" -ForegroundColor Cyan
     $dominioDN = (Get-ADDomain).DistinguishedName
     $upnSuffix = (Get-ADDomain).DNSRoot
     $departamentos = @("Finanzas", "IT", "RRHH", "Soporte", "Ventas")
 
-    # --- PASO 1: CREAR EMPRESA ---
+    # PASO 1: Crear jerarquia de OUs con verificacion real
     $rutaEmpresa = "OU=Empresa,$dominioDN"
     if (-not (Get-ADOrganizationalUnit -Filter "DistinguishedName -eq '$rutaEmpresa'" -ErrorAction SilentlyContinue)) {
         New-ADOrganizationalUnit -Name "Empresa" -Path $dominioDN
-        Write-Host "[+] Creada: Empresa" -ForegroundColor Green
-        Start-Sleep -Seconds 1 # Pausa para que el AD asimile la carpeta
+        Start-Sleep -Seconds 2 # Espera de seguridad para el AD
     }
 
-    # --- PASO 2: CREAR EQUIPOS (DENTRO DE EMPRESA) ---
     $rutaEquiposBase = "OU=Equipos,$rutaEmpresa"
     if (-not (Get-ADOrganizationalUnit -Filter "DistinguishedName -eq '$rutaEquiposBase'" -ErrorAction SilentlyContinue)) {
         New-ADOrganizationalUnit -Name "Equipos" -Path $rutaEmpresa
-        Write-Host "[+] Creada: Equipos" -ForegroundColor Green
         Start-Sleep -Seconds 1
     }
 
-    # --- PASO 3: CREAR DEPARTAMENTOS DE EQUIPOS ---
     foreach ($dep in $departamentos) {
         $rutaDep = "OU=$dep,$rutaEquiposBase"
         if (-not (Get-ADOrganizationalUnit -Filter "DistinguishedName -eq '$rutaDep'" -ErrorAction SilentlyContinue)) {
             New-ADOrganizationalUnit -Name $dep -Path $rutaEquiposBase
-            Write-Host "    [+] Subcarpeta Equipo: $dep" -ForegroundColor Gray
+            Write-Host "  [+] Carpeta de equipos creada: $dep" -ForegroundColor Green
         }
     }
 
-    # --- PASO 4: USUARIOS Y GRUPOS (Tu script Creausuarios ya crea OU=Usuarios) ---
-    Write-Host "[2/3] Creando Usuarios y Grupos..." -ForegroundColor Yellow
+    # PASO 2: Usuarios y Grupos (Tu script secundario)
     if (Test-Path ".\Creausuarios.ps1") {
+        Write-Host "[2/3] Creando Usuarios y Grupos..." -ForegroundColor Yellow
         .\Creausuarios.ps1 -CsvPath ".\usuarios.csv" -DomainDN $dominioDN -UpnSuffix $upnSuffix -Delimiter ";"
     }
 
-    # --- PASO 5: CREAR LOS OBJETOS PC ---
-    Write-Host "[3/3] Creando PCs..." -ForegroundColor Yellow
-    Start-Sleep -Seconds 1
+    # PASO 3: Crear Equipos (Con proteccion de variables)
+    Write-Host "[3/3] Creando objetos de equipo..." -ForegroundColor Yellow
+    Start-Sleep -Seconds 2
     foreach ($dep in $departamentos) {
         $rutaDestino = "OU=$dep,$rutaEquiposBase"
         $nombrePC = "$($dep.Substring(0,3).ToUpper())-PC01"
@@ -121,14 +117,15 @@ do {
         try {
             if (-not (Get-ADComputer -Filter "Name -eq '$nombrePC'")) {
                 New-ADComputer -Name $nombrePC -SamAccountName "$nombrePC$" -Path $rutaDestino -Enabled $true
-                Write-Host "    [OK] PC: $nombrePC" -ForegroundColor White
+                Write-Host "  [OK] PC ${nombrePC} asignado a su OU." -ForegroundColor Gray
             }
         } catch {
-            Write-Host "    [!] Error en PC $nombrePC: El AD aun no ve la carpeta." -ForegroundColor Red
+            # Usamos ${variable} para evitar el error de la captura image_c5a411.png
+            Write-Host "  [!] No se pudo crear ${nombrePC}: El servidor aun procesa la OU." -ForegroundColor Red
         }
     }
 
-    Write-Host "--- PROCESO COMPLETADO ---" -ForegroundColor Green
+    Write-Host "--- PROCESO FINALIZADO ---" -ForegroundColor Green
     Pause
 }
         "5" {
