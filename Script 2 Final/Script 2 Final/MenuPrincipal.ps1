@@ -74,77 +74,69 @@ do {
             .\moverequipos.ps1
             Pause
         }
-       "4" $dominioDN = (Get-ADDomain).DistinguishedName
-$upnSuffix = (Get-ADDomain).DNSRoot
-$departamentos = @("Finanzas", "IT", "RRHH", "Soporte", "Ventas")
+       "4" {
+        Write-Host "--- AUTOMATIZACION TOTAL: 5 DEPARTAMENTOS X 4 EQUIPOS ---" -ForegroundColor Cyan
+        $dominioDN = (Get-ADDomain).DistinguishedName
+        $upnSuffix = (Get-ADDomain).DNSRoot
+        $departamentos = @("Finanzas", "IT", "RRHH", "Soporte", "Ventas")
 
-Write-Host "--- INICIANDO DESPLIEGUE INTEGRAL GRUPO 5 ---" -ForegroundColor Cyan
-
-# 1. CREAR ESTRUCTURA BASE (OU EMPRESA)
-$rutaEmpresa = "OU=Empresa,$dominioDN"
-if (-not (Get-ADOrganizationalUnit -Filter "DistinguishedName -eq '$rutaEmpresa'" -ErrorAction SilentlyContinue)) {
-    New-ADOrganizationalUnit -Name "Empresa" -Path $dominioDN
-    Write-Host "[+] OU Empresa creada" -ForegroundColor Green
-}
-
-# 2. CREAR CONTENEDORES PRINCIPALES (Equipos, Usuarios, Grupos)
-foreach ($tipo in @("Equipos", "Usuarios", "Grupos")) {
-    $rutaTipo = "OU=$tipo,$rutaEmpresa"
-    if (-not (Get-ADOrganizationalUnit -Filter "DistinguishedName -eq '$rutaTipo'" -ErrorAction SilentlyContinue)) {
-        New-ADOrganizationalUnit -Name $tipo -Path $rutaEmpresa
-    }
-}
-
-# 3. PROCESAR LAS 5 RAMAS
-foreach ($dep in $departamentos) {
-    Write-Host "`nConfigurando rama: $dep" -ForegroundColor White
-    
-    $pathDepEquipos = "OU=$dep,OU=Equipos,$rutaEmpresa"
-    $pathDepUsuarios = "OU=$dep,OU=Usuarios,$rutaEmpresa"
-
-    # Crear OUs de departamento
-    if (-not (Get-ADOrganizationalUnit -Filter "DistinguishedName -eq '$pathDepEquipos'" -ErrorAction SilentlyContinue)) {
-        New-ADOrganizationalUnit -Name $dep -Path "OU=Equipos,$rutaEmpresa"
-    }
-    if (-not (Get-ADOrganizationalUnit -Filter "DistinguishedName -eq '$pathDepUsuarios'" -ErrorAction SilentlyContinue)) {
-        New-ADOrganizationalUnit -Name $dep -Path "OU=Usuarios,$rutaEmpresa"
-    }
-
-    # Crear Grupo de Seguridad
-    $nombreGrupo = "GS_$dep"
-    if (-not (Get-ADGroup -Filter "Name -eq '$nombreGrupo'" -ErrorAction SilentlyContinue)) {
-        New-ADGroup -Name $nombreGrupo -GroupScope Global -Path "OU=Grupos,$rutaEmpresa"
-        Write-Host "  [+] Grupo ${nombreGrupo} creado" -ForegroundColor Green
-    }
-
-    # 4. CREAR 4 EQUIPOS POR RAMA (Corrección IT y Dos Puntos)
-    # Si es 'IT', el prefijo es 'IT', si no, las primeras 3 letras
-    $prefijo = if ($dep.Length -lt 3) { $dep.ToUpper() } else { $dep.Substring(0,3).ToUpper() }
-
-    for ($i = 1; $i -le 4; $i++) {
-        $nombrePC = "${prefijo}-PC0$i"
-        try {
-            if (-not (Get-ADComputer -Filter "Name -eq '$nombrePC'" -ErrorAction SilentlyContinue)) {
-                New-ADComputer -Name $nombrePC -SamAccountName "${nombrePC}$" -Path $pathDepEquipos -Enabled $true
-                # Protegemos la variable con ${} para evitar el error de la captura image_c5aefc.png
-                Write-Host "    [OK] Equipo ${nombrePC}: Creado" -ForegroundColor Gray
-            }
-        } catch {
-            Write-Host "    [!] Error en ${nombrePC}: $($_.Exception.Message)" -ForegroundColor Red
+        # PASO 1: Asegurar Estructura de OUs
+        $rutaEmpresa = "OU=Empresa,$dominioDN"
+        if (-not (Get-ADOrganizationalUnit -Filter "DistinguishedName -eq '$rutaEmpresa'" -ErrorAction SilentlyContinue)) {
+            New-ADOrganizationalUnit -Name "Empresa" -Path $dominioDN
+            Start-Sleep -Seconds 1
         }
-    }
 
-    # 5. CREAR USUARIO DE PRUEBA
-    $uNombre = "User_$dep"
-    if (-not (Get-ADUser -Filter "SamAccountName -eq '$uNombre'" -ErrorAction SilentlyContinue)) {
-        New-ADUser -Name $uNombre -SamAccountName $uNombre -Path $pathDepUsuarios -Enabled $true -DisplayName "Usuario $dep"
-        Add-ADGroupMember -Identity $nombreGrupo -Members $uNombre
-        Write-Host "  [+] Usuario ${uNombre} creado y unido a ${nombreGrupo}" -ForegroundColor Yellow
-    }
-}
+        $rutaEquipos = "OU=Equipos,$rutaEmpresa"
+        if (-not (Get-ADOrganizationalUnit -Filter "DistinguishedName -eq '$rutaEquipos'" -ErrorAction SilentlyContinue)) {
+            New-ADOrganizationalUnit -Name "Equipos" -Path $rutaEmpresa
+            Start-Sleep -Seconds 1
+        }
 
-Write-Host "`n--- PROCESO COMPLETADO ---" -ForegroundColor Cyan
-Pause
+        foreach ($dep in $departamentos) {
+            $pathDep = "OU=$dep,$rutaEquipos"
+            if (-not (Get-ADOrganizationalUnit -Filter "DistinguishedName -eq '$pathDep'" -ErrorAction SilentlyContinue)) {
+                New-ADOrganizationalUnit -Name $dep -Path $rutaEquipos
+                Write-Host "  [+] Creada carpeta de equipos: $dep" -ForegroundColor Green
+            }
+        }
+
+        # PASO 2: Usuarios y Grupos (Llamada al script secundario)
+        if (Test-Path ".\Creausuarios.ps1") {
+            .\Creausuarios.ps1 -CsvPath ".\usuarios.csv" -DomainDN $dominioDN -UpnSuffix $upnSuffix -Delimiter ";"
+        }
+
+        # PASO 3: Generación de 4 PCs por cada una de las 5 Ramas
+        Write-Host "[3/3] Creando 20 equipos en total..." -ForegroundColor Yellow
+        Start-Sleep -Seconds 2 # Pausa de seguridad para sincronización del AD
+
+        foreach ($dep in $departamentos) {
+            $destinoPC = "OU=$dep,$rutaEquipos"
+            
+            # Verificación: ¿Existe la carpeta realmente?
+            if (Get-ADOrganizationalUnit -Identity $destinoPC -ErrorAction SilentlyContinue) {
+                # Prefijo seguro para nombres cortos como "IT" (evita el error de image_c5b6d5.jpg)
+                $prefijo = if ($dep.Length -ge 3) { $dep.Substring(0,3).ToUpper() } else { $dep.ToUpper() }
+
+                for ($i = 1; $i -le 4; $i++) {
+                    $nombrePC = "${prefijo}-PC0$i"
+                    
+                    if (-not (Get-ADComputer -Filter "Name -eq '$nombrePC'" -ErrorAction SilentlyContinue)) {
+                        try {
+                            New-ADComputer -Name $nombrePC -SamAccountName "$nombrePC$" -Path $destinoPC -Enabled $true
+                            Write-Host "    [OK] Creado: $nombrePC en $dep" -ForegroundColor Gray
+                        } catch {
+                            Write-Host "    [!] Error en $nombrePC: $($_.Exception.Message)" -ForegroundColor Red
+                        }
+                    }
+                }
+            } else {
+                Write-Host "  [!] Advertencia: La carpeta $dep no esta lista aun." -ForegroundColor Red
+            }
+        }
+        Write-Host "--- PROCESO FINALIZADO CON EXITO ---" -ForegroundColor Green
+        Pause
+    }
         "5" {
             Write-Host "Abriendo archivos de registro..." -ForegroundColor Cyan
             if (Test-Path ".\provision-ad.log") { notepad ".\provision-ad.log" }
