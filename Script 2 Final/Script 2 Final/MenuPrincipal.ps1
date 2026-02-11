@@ -77,34 +77,37 @@ do {
         "4" {
     Write-Host "--- INICIANDO PROCESO DE AUTOMATIZACION COMPLETO ---" -ForegroundColor Cyan
     
-    # 1. Crear OUs, Grupos y Usuarios usando tu script Creausuarios.ps1
+    # 1. Detectar datos del dominio
+    $dominioDN = (Get-ADDomain).DistinguishedName
+    $upnSuffix = (Get-ADDomain).DNSRoot
+
+    # 2. Ejecutar la creación de OUs, Usuarios y GRUPOS
+    # Llamamos a tu script Creausuarios.ps1 que ya tiene la lógica de grupos (BLOQUE 5)
     if (Test-Path ".\Creausuarios.ps1") {
-        Write-Host "[1/2] Creando estructura y usuarios..." -ForegroundColor Yellow
-        .\Creausuarios.ps1 -CsvPath ".\usuarios.csv" -DomainDN $domainDN -UpnSuffix $upnSuffix
+        Write-Host "[1/2] Creando estructura, grupos y usuarios..." -ForegroundColor Yellow
+        # IMPORTANTE: Usamos -ErrorAction SilentlyContinue para una consola limpia
+        .\Creausuarios.ps1 -CsvPath ".\usuarios.csv" -DomainDN $dominioDN -UpnSuffix $upnSuffix -Delimiter ";"
     } else {
-        Write-Host "[!] Error: No se encuentra Creausuarios.ps1" -ForegroundColor Red
+        Write-Host "[!] ERROR: No se encuentra el archivo Creausuarios.ps1 en la carpeta." -ForegroundColor Red
     }
 
-    # 2. Crear Equipos directamente (Para no depender de archivos externos)
-    Write-Host "[2/2] Creando y organizando equipos por departamento..." -ForegroundColor Yellow
+    # 3. Crear y Organizar los Equipos (Integrado aquí para evitar errores de archivos faltantes)
+    Write-Host "[2/2] Creando y organizando objetos de equipo..." -ForegroundColor Yellow
+    $deps = @("Finanzas", "IT", "RRHH", "Soporte", "Ventas")
     
-    # Lista de departamentos para crear equipos de ejemplo
-    $departamentos = @("IT", "Ventas", "RRHH", "Finanzas")
-    $rutaEmpresa = "OU=Equipos,OU=Empresa,$domainDN"
-
-    foreach ($dep in $departamentos) {
-        $rutaDep = "OU=$dep,$rutaEmpresa"
-        # Verificamos si la OU del departamento existe
-        if (Test-Path "AD:\$rutaDep") {
-            $nombreEquipo = "$($dep)-PC01"
-            if (-not (Get-ADComputer -Filter "Name -eq '$nombreEquipo'")) {
-                New-ADComputer -Name $nombreEquipo -SamAccountName "$nombreEquipo$" -Path $rutaDep
-                Write-Host "Equipo $nombreEquipo creado en $dep" -ForegroundColor Gray
+    foreach ($d in $deps) {
+        $rutaEquipos = "OU=$d,OU=Equipos,OU=Empresa,$dominioDN"
+        # Verificamos si la OU se creó en el paso anterior
+        if (Get-ADOrganizationalUnit -Filter "DistinguishedName -eq '$rutaEquipos'" -ErrorAction SilentlyContinue) {
+            $nombrePC = "$($d.Substring(0,3).ToUpper())-PC01"
+            if (-not (Get-ADComputer -Filter "Name -eq '$nombrePC'")) {
+                New-ADComputer -Name $nombrePC -SamAccountName "$nombrePC$" -Path $rutaEquipos
+                Write-Host "[OK] Equipo creado: $nombrePC" -ForegroundColor Gray
             }
         }
     }
 
-    Write-Host "--- PROCESO FINALIZADO ---" -ForegroundColor Green
+    Write-Host "--- AUTOMATIZACION FINALIZADA CON EXITO ---" -ForegroundColor Green
     Pause
 }
         "5" {
