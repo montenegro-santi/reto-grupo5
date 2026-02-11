@@ -75,48 +75,69 @@ do {
             Pause
         }
        "4" {
-        Write-Host "--- DESPLIEGUE TOTAL: REUBICANDO Y CREANDO EN LAS 5 RAMAS ---" -ForegroundColor Cyan
+        Write-Host "--- DESPLIEGUE TOTAL: ASEGURANDO ESTRUCTURA Y RAMAS ---" -ForegroundColor Cyan
         $dominioDN = (Get-ADDomain).DistinguishedName
         $departamentos = @("Finanzas", "IT", "RRHH", "Soporte", "Ventas")
-        $rutaEquiposBase = "OU=Equipos,OU=Empresa,$dominioDN"
 
+        # --- NIVEL 1: ASEGURAR ESTRUCTURA BASE ---
+        $rutaEmpresa = "OU=Empresa,$dominioDN"
+        if (-not (Get-ADOrganizationalUnit -Filter "DistinguishedName -eq '$rutaEmpresa'" -ErrorAction SilentlyContinue)) {
+            New-ADOrganizationalUnit -Name "Empresa" -Path $dominioDN
+            Write-Host "[+] Creada OU: Empresa" -ForegroundColor Green
+        }
+
+        $rutaEquiposBase = "OU=Equipos,$rutaEmpresa"
+        if (-not (Get-ADOrganizationalUnit -Filter "DistinguishedName -eq '$rutaEquiposBase'" -ErrorAction SilentlyContinue)) {
+            New-ADOrganizationalUnit -Name "Equipos" -Path $rutaEmpresa
+            Write-Host "[+] Creada OU: Equipos" -ForegroundColor Green
+        }
+
+        # --- NIVEL 2: PROCESAR CADA RAMA ---
         foreach ($dep in $departamentos) {
             $pathDep = "OU=$dep,$rutaEquiposBase"
-            Write-Host "`n> Rama: $dep" -ForegroundColor Yellow
+            Write-Host "`n> Configurando Rama: $dep" -ForegroundColor Yellow
 
-            # Asegurar OU del departamento
+            # Asegurar que la sub-OU del departamento existe (Evita el error 'Object Not Found')
             if (-not (Get-ADOrganizationalUnit -Filter "DistinguishedName -eq '$pathDep'" -ErrorAction SilentlyContinue)) {
-                New-ADOrganizationalUnit -Name $dep -Path $rutaEquiposBase
-                Start-Sleep -Milliseconds 200
+                try {
+                    New-ADOrganizationalUnit -Name $dep -Path $rutaEquiposBase
+                    Write-Host "  [+] Rama $dep creada con exito." -ForegroundColor Green
+                    Start-Sleep -Milliseconds 300 # Pausa técnica para sincronización de AD
+                } catch {
+                    Write-Host "  [!] Error critico al crear carpeta $dep: $($_.Exception.Message)" -ForegroundColor Red
+                    continue # Salta al siguiente departamento si este falla
+                }
             }
 
+            # Lógica de nombre (Parche IT incluido)
             $prefijo = if ($dep.Length -ge 3) { $dep.Substring(0,3).ToUpper() } else { $dep.ToUpper() }
 
+            # --- NIVEL 3: CREAR/MOVER EQUIPOS ---
             for ($i = 1; $i -le 4; $i++) {
                 $nombrePC = "${prefijo}-PC0$i"
                 try {
                     $objPC = Get-ADComputer -Filter "Name -eq '$nombrePC'" -ErrorAction SilentlyContinue
                     
                     if (-not $objPC) {
-                        # CASO 1: No existe, lo creamos de cero en la rama correcta
+                        # No existe, lo creamos
                         New-ADComputer -Name $nombrePC -SamAccountName "${nombrePC}$" -Path $pathDep -Enabled $true
-                        Write-Host "    [NUEVO] ${nombrePC} creado en ${dep}" -ForegroundColor Green
+                        Write-Host "    [NUEVO] ${nombrePC} creado en ${dep}" -ForegroundColor Gray
                     } 
                     elseif ($objPC.DistinguishedName -notlike "*$pathDep*") {
-                        # CASO 2: Existe pero en otra carpeta, lo MOVEMOS a la rama correcta
+                        # Existe pero mal ubicado, lo movemos
                         Move-ADObject -Identity $objPC.DistinguishedName -TargetPath $pathDep
-                        Write-Host "    [MOVIDO] ${nombrePC} movido a la rama ${dep}" -ForegroundColor Blue
+                        Write-Host "    [MOVIDO] ${nombrePC} reubicado en ${dep}" -ForegroundColor Blue
                     }
                     else {
-                        Write-Host "    [OK] ${nombrePC} ya está correctamente en ${dep}" -ForegroundColor Gray
+                        Write-Host "    [OK] ${nombrePC} ya esta en su sitio." -ForegroundColor DarkGray
                     }
                 } catch {
-                    # Usamos ${} para evitar el error de los dos puntos (:)
-                    Write-Host "    [!] Error con ${nombrePC}: $($_.Exception.Message)" -ForegroundColor Red
+                    # Usamos ${} para evitar errores de sintaxis con los dos puntos (:)
+                    Write-Host "    [!] Error en ${nombrePC}: $($_.Exception.Message)" -ForegroundColor Red
                 }
             }
         }
-        Write-Host "`n--- PROCESO FINALIZADO ---" -ForegroundColor Green
+        Write-Host "`n--- PROCESO FINALIZADO CON EXITO ---" -ForegroundColor Green
         Pause
     }
         "5" {
