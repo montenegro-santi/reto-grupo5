@@ -184,52 +184,48 @@ do {
         "12"{
     $archivo = Get-ChildItem -Path "$PSScriptRoot\Backup_Total_*.csv" | Sort-Object LastWriteTime -Descending | Select-Object -First 1
     if ($archivo) {
+        # Cargamos los datos con UTF8 para mantener las tildes
         $datos = Import-Csv -Path $archivo.FullName -Encoding UTF8
-        
-        # 1. FUNCION PARA LIMPIAR TILDES (Ahora se usa en nombres y rutas)
-        function Limpiar-Texto($texto) {
-            if ($null -eq $texto) { return $null }
-            $bytes = [Text.Encoding]::GetEncoding("Cyrillic").GetBytes($texto)
-            return [Text.Encoding]::ASCII.GetString($bytes)
+        $dominioRaiz = (Get-ADDomain).DistinguishedName
+
+        Write-Host "--- INICIANDO RESTAURACION JERARQUICA ---" -ForegroundColor Cyan
+
+        # PASO 1: Crear todas las OUs primero
+        foreach ($obj in $datos | Where-Object { $_.ObjectClass -eq "organizationalUnit" }) {
+            $partes = $obj.DistinguishedName.Split(",") | Where-Object { $_ -like "OU=*" }
+            $rutaActual = $dominioRaiz
+            for ($i = $partes.Count - 1; $i -ge 0; $i--) {
+                $ouNombre = $partes[$i].ToString().Replace("OU=", "")
+                if (-not (Get-ADOrganizationalUnit -Filter "Name -eq '$ouNombre'" -SearchBase $rutaActual -SearchScope OneLevel)) {
+                    New-ADOrganizationalUnit -Name $ouNombre -Path $rutaActual
+                    Write-Host "[OK] Carpeta creada: $ouNombre" -ForegroundColor Green
+                }
+                $rutaActual = "OU=$ouNombre,$rutaActual"
+            }
         }
 
-        # 2. PROCESO DE RESTAURACION
-        foreach ($obj in $datos) {
-            $nombreLimpio = Limpiar-Texto $obj.Name
-            $dnLimpio = Limpiar-Texto $obj.DistinguishedName
-            
-            if ($obj.ObjectClass -eq "organizationalUnit") {
-                # Extraemos las OUs de la ruta y las creamos una a una
-                $partes = $dnLimpio.Split(",") | Where-Object { $_ -like "OU=*" }
-                $rutaBase = (Get-ADDomain).DistinguishedName
-                for ($i = $partes.Count - 1; $i -ge 0; $i--) {
-                    $ouNombre = $partes[$i].ToString().Replace("OU=", "")
-                    if (-not (Get-ADOrganizationalUnit -Filter "Name -eq '$ouNombre'" -SearchBase $rutaBase -SearchScope OneLevel)) {
-                        New-ADOrganizationalUnit -Name $ouNombre -Path $rutaBase
-                        Write-Host "[OK] Carpeta creada: $ouNombre" -ForegroundColor Green
-                    }
-                    $rutaBase = "OU=$ouNombre,$rutaBase"
-                }
-            }
-            elseif ($obj.ObjectClass -eq "user" -and $obj.SamAccountName -ne "Administrator") {
+        # PASO 2: Crear Grupos, Usuarios y Equipos (ahora que las OUs existen)
+        foreach ($obj in $datos | Where-Object { $_.ObjectClass -ne "organizationalUnit" }) {
+            $nombre = $obj.Name
+            $padreDN = $obj.DistinguishedName.Substring($obj.DistinguishedName.IndexOf(",") + 1)
+
+            if ($obj.ObjectClass -eq "user" -and $obj.SamAccountName -ne "Administrator") {
                 if (-not (Get-ADUser -Filter "SamAccountName -eq '$($obj.SamAccountName)'")) {
                     $pass = ConvertTo-SecureString "Password2026!" -AsPlainText -Force
-                    $padreDN = $dnLimpio.Substring($dnLimpio.IndexOf(",") + 1)
-                    New-ADUser -Name $nombreLimpio -SamAccountName $obj.SamAccountName -AccountPassword $pass -Enabled $true -Path $padreDN
-                    Write-Host "Usuario en su sitio: $nombreLimpio" -ForegroundColor White
+                    New-ADUser -Name $nombre -SamAccountName $obj.SamAccountName -AccountPassword $pass -Enabled $true -Path $padreDN
+                    Write-Host "Usuario restaurado: $nombre" -ForegroundColor White
                 }
             }
             elseif ($obj.ObjectClass -eq "computer") {
-                if (-not (Get-ADComputer -Filter "Name -eq '$nombreLimpio'")) {
-                    # Aqui estaba el fallo: forzamos que la ruta padre este limpia de tildes
-                    $padreDN = $dnLimpio.Substring($dnLimpio.IndexOf(",") + 1)
-                    try {
-                        New-ADComputer -Name $nombreLimpio -SamAccountName "$nombreLimpio$" -Path $padreDN
-                        Write-Host "Equipo en su sitio: $nombreLimpio" -ForegroundColor Gray
-                    } catch {
-                        Write-Host "[!] Error creando $nombreLimpio. Reintentando en carpeta Computers..." -ForegroundColor Yellow
-                        New-ADComputer -Name $nombreLimpio -SamAccountName "$nombreLimpio$"
-                    }
+                if (-not (Get-ADComputer -Filter "Name -eq '$nombre'")) {
+                    New-ADComputer -Name $nombre -SamAccountName "$nombre$" -Path $padreDN
+                    Write-Host "Equipo restaurado: $nombre" -ForegroundColor Gray
+                }
+            }
+            elseif ($obj.ObjectClass -eq "group") {
+                if (-not (Get-ADGroup -Filter "Name -eq '$nombre'")) {
+                    New-ADGroup -Name $nombre -GroupScope Global -Path $padreDN
+                    Write-Host "Grupo restaurado: $nombre" -ForegroundColor Yellow
                 }
             }
         }
