@@ -18,7 +18,7 @@ function Ejecutar-Rollback {
     
     # Verificamos si la OU existe antes de intentar borrar
     if (Get-ADOrganizationalUnit -Filter "DistinguishedName -eq '$targetOU'") {
-        $confirm = Read-Host "ADVERTENCIA: Se borrar�n TODOS los usuarios y grupos de '$targetOU'. �Proceder? (S/N)"
+        $confirm = Read-Host "ADVERTENCIA: Se borraran TODOS los usuarios y grupos de '$targetOU'. ¿Proceder? (S/N)"
         if ($confirm -eq "S" -or $confirm -eq "s") {
             Write-Host "Limpiando infraestructura..." -ForegroundColor Yellow
             
@@ -29,10 +29,10 @@ function Ejecutar-Rollback {
             # 2. Borramos la OU ra�z y todo lo que tiene dentro (Recursivo)
             Remove-ADOrganizationalUnit -Identity $targetOU -Recursive -Confirm:$false
             
-            Write-Host "Rollback completado. El dominio est� limpio." -ForegroundColor Green
+            Write-Host "Rollback completado. El dominio esta limpio." -ForegroundColor Green
         }
     } else {
-        Write-Host "No se encontr� la carpeta 'Empresa'. El dominio ya est� limpio." -ForegroundColor Gray
+        Write-Host "No se encontro la carpeta 'Empresa'. El dominio ya esta limpio." -ForegroundColor Gray
     }
     }
 
@@ -52,7 +52,7 @@ function Mostrar-Menu {
     Write-Host "9. Listar usuarios inactivos (30 dias)"
     Write-Host "10. Crear copia de seguridad de usuarios"
     Write-Host "11. Auditoria proactiva de seguridad"
-    Write-Host "12. Restaurar usuarios desde backup"
+    Write-Host "12. Restaurar todo desde backup"
     Write-Host "13. Salir"
     Write-Host "=============================================="
 }
@@ -75,11 +75,11 @@ do {
             Pause
         }
         "4" {
-            Write-Host "Iniciando automatizaci�n total en $dominioNombre..." -ForegroundColor Yellow
+            Write-Host "Iniciando automatizacion total en $dominioNombre..." -ForegroundColor Yellow
             .\Creausuarios.ps1 -CsvPath ".\usuarios.csv" -DomainDN $domainDN -UpnSuffix $upnSuffix
             .\Computers.ps1 -CsvPath ".\equipos.csv"
             .\moverequipos.ps1
-            Write-Host "�Dominio configurado con �xito!" -ForegroundColor Green
+            Write-Host "Dominio configurado con exito!" -ForegroundColor Green
             Pause
         }
         "5" {
@@ -130,9 +130,18 @@ do {
             Pause
             }   
         "10" {
-             $fecha = Get-Date -Format "yyyyMMdd_HHmm"
-            Get-ADUser -Filter * | Export-Csv "$PSScriptRoot\Backup_Users_$fecha.csv"
-            Write-Host "Copia de seguridad de usuarios creada." -ForegroundColor Green
+            $fecha = Get-Date -Format "yyyyMMdd_HHmm"
+            $rutaFinal = "$PSScriptRoot\Backup_Total_$fecha.csv"
+    
+            Write-Host "Generando Backup Total (Usuarios, Grupos y OUs)..." -ForegroundColor Yellow
+    
+            # Exportamos todos los objetos con sus propiedades críticas y forzamos UTF8
+            Get-ADObject -Filter * -IncludeDeletedObjects -Properties * | 
+            Select-Object Name, ObjectClass, DistinguishedName, SamAccountName, Category | 
+            Export-Csv -Path $rutaFinal -NoTypeInformation -Encoding UTF8
+    
+            Write-Host "¡Backup Total creado con exito!" -ForegroundColor Green
+            Write-Host "Ubicacion: $rutaFinal" -ForegroundColor Cyan
             Pause
             }
         "11"{
@@ -173,45 +182,42 @@ do {
             Pause
             }
         "12"{
-            Write-Host "--- RESTAURANDO USUARIOS DESDE BACKUP ---" -ForegroundColor Cyan
-    
-            # 1. Buscar el archivo más reciente en la carpeta
-            $archivoBackup = Get-ChildItem -Path "$PSScriptRoot\Backup_Users_*.csv" | Sort-Object LastWriteTime -Descending | Select-Object -First 1
-    
-            if (-not $archivoBackup) {
-            Write-Host "Error: No se ha encontrado ningún archivo de backup en $PSScriptRoot" -ForegroundColor Red
-            } else {
-            Write-Host "Usando el backup más reciente: $($archivoBackup.Name)" -ForegroundColor Yellow
-            $confirmar = Read-Host "¿Estás seguro de que quieres importar estos usuarios? (S/N)"
-        
-            if ($confirmar -eq "S") {
-            $usuarios = Import-Csv -Path $archivoBackup.FullName
+    $archivo = Get-ChildItem -Path "$PSScriptRoot\Backup_Total_*.csv" | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+    if ($archivo) {
+        $datos = Import-Csv -Path $archivo.FullName -Encoding UTF8
+        foreach ($obj in $datos) {
+            # FUNCIÓN PRO: Quitar tildes del nombre para evitar errores
+            $nombreLimpio = [Text.Encoding]::ASCII.GetString([Text.Encoding]::GetEncoding("Cyrillic").GetBytes($obj.Name))
             
-            foreach ($u in $usuarios) {
-                # Verificamos si el usuario ya existe para no dar error
-                if (-not (Get-ADUser -Filter "SamAccountName -eq '$($u.SamAccountName)'")) {
-                    Write-Host "Restaurando usuario: $($u.SamAccountName)..." -ForegroundColor Gray
-                    
-                    # Creamos el usuario con los datos básicos del CSV
-                    # Nota: La contraseña no se guarda en el CSV por seguridad, pondremos una por defecto
-                    $password = ConvertTo-SecureString "Password2026!" -AsPlainText -Force
-                    
-                    New-ADUser -Name $u.Name `
-                               -SamAccountName $u.SamAccountName `
-                               -UserPrincipalName $u.UserPrincipalName `
-                               -AccountPassword $password `
-                               -Enabled $true `
-                               -DisplayName $u.DisplayName
-                               
-                    Write-Host " [OK] $($u.SamAccountName) restaurado." -ForegroundColor Green
-                } else {
-                    Write-Host " [!] El usuario $($u.SamAccountName) ya existe, saltando..." -ForegroundColor Yellow
+            if ($obj.ObjectClass -eq "organizationalUnit") {
+                if (-not (Get-ADOrganizationalUnit -Filter "Name -eq '$nombreLimpio'")) {
+                    New-ADOrganizationalUnit -Name $nombreLimpio -Path ( (Get-ADDomain).DistinguishedName )
+                    Write-Host "OU Restaurada: $nombreLimpio" -ForegroundColor Green
                 }
+            }
+            elseif ($obj.ObjectClass -eq "group") {
+                if (-not (Get-ADGroup -Filter "Name -eq '$nombreLimpio'")) {
+                    New-ADGroup -Name $nombreLimpio -GroupScope Global
+                    Write-Host "Grupo Restaurado: $nombreLimpio" -ForegroundColor Cyan
                 }
+            }
+            elseif ($obj.ObjectClass -eq "user" -and $obj.SamAccountName -ne "Administrator") {
+                if (-not (Get-ADUser -Filter "SamAccountName -eq '$($obj.SamAccountName)'")) {
+                    $pass = ConvertTo-SecureString "Password2026!" -AsPlainText -Force
+                    New-ADUser -Name $nombreLimpio -SamAccountName $obj.SamAccountName -AccountPassword $pass -Enabled $true
+                    Write-Host "Usuario Restaurado: $nombreLimpio" -ForegroundColor White
                 }
-                }
-                    Pause
-                }
+            }
+            elseif ($obj.ObjectClass -eq "computer") {
+                if (-not (Get-ADComputer -Filter "Name -eq '$nombreLimpio'")) {
+                    New-ADComputer -Name $nombreLimpio -SamAccountName "$nombreLimpio$"
+                     Write-Host "Equipo Restaurado: $nombreLimpio" -ForegroundColor Gray
+    }
+}
+        }
+    }
+    Pause
+}
         "13"{
             Write-Host "Saliendo del gestor..." -ForegroundColor Gray
             return
@@ -221,4 +227,4 @@ do {
             Pause
         }
     }
-} while ($opcion -ne "12")
+} while ($opcion -ne "13")
