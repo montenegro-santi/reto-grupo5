@@ -1,3 +1,4 @@
+#EL BUENO#
 #Requires -Modules ActiveDirectory
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 
