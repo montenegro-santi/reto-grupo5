@@ -89,26 +89,29 @@ do {
             Ejecutar-Rollback
             Pause 
         }
-        "7"{ 
-           Write-Host "--- ESTADO DE SALUD DEL SERVIDOR ---" -ForegroundColor Cyan
-            $servicios = @("dns", "adws", "ntds", "kdc")
+       "7" { 
+            Write-Host "`n--- ESTADO DE SALUD DEL SERVIDOR ---" -ForegroundColor Cyan
+            # Verificamos los 3 pilares de Active Directory
+            $servicios = @("dns", "adws", "ntds")
             foreach ($s in $servicios) {
-            $status = Get-Service $s
-            $color = if ($status.Status -eq "Running") { "Green" } else { "Red" }
-            Write-Host "$($status.DisplayName): [$($status.Status)]" -ForegroundColor $color
+                $status = Get-Service $s -ErrorAction SilentlyContinue
+                if ($status) {
+                    $color = if ($status.Status -eq "Running") { "Green" } else { "Red" }
+                    Write-Host "$($status.DisplayName): [$($status.Status)]" -ForegroundColor $color
+                } else {
+                    Write-Host "Servicio $s: [NO ENCONTRADO]" -ForegroundColor Yellow
+                }
             }
-            Write-Host "`nEspacio en disco C: " -NoNewline
-            $disk = Get-PSDrive C
-            Write-Host "$([Math]::Round($disk.Free/1GB, 2)) GB libres" -ForegroundColor Yellow
-            Pause
-            }
-        "8"{
+            Write-Host "-------------------------------------"
+            Pause 
+        }
+        "8" { 
             Write-Host "Saliendo del gestor..." -ForegroundColor Gray
-            break 
+            return 
         }
         Default { 
-            Write-Host "Opci�n no v�lida, intenta de nuevo." -ForegroundColor Red
-            Start-Sleep -Seconds 1
+            Write-Host "Opción no válida, intenta de nuevo." -ForegroundColor Red
+            Pause
         }
     }
 } while ($opcion -ne "8")
