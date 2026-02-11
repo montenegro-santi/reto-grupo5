@@ -52,7 +52,8 @@ function Mostrar-Menu {
     Write-Host "9. Listar usuarios inactivos (30 dias)"
     Write-Host "10. Crear copia de seguridad de usuarios"
     Write-Host "11. Auditoria proactiva de seguridad"
-    Write-Host "12. Salir"
+    Write-Host "12. Restaurar usuarios desde backup"
+    Write-Host "13. Salir"
     Write-Host "=============================================="
 }
 
@@ -118,7 +119,7 @@ do {
             Pause
         }
         "9" {
-           Write-Host "Buscando usuarios inactivos (30 días)..." -ForegroundColor Yellow
+           Write-Host "Buscando usuarios inactivos (30 dias)..." -ForegroundColor Yellow
             $fecha = (Get-Date).AddDays(-30)
             $inactivos = Get-ADUser -Filter "LastLogonDate -lt '$fecha'" -Properties LastLogonDate
             if ($inactivos) {
@@ -164,7 +165,7 @@ do {
             Write-Host "[!] Verificando Papelera de Reciclaje de Active Directory..." -ForegroundColor Yellow
             $features = Get-ADOptionalFeature -Filter 'Name -like "Recycle Bin Feature"'
             if ($features.EnabledScopes) {
-            Write-Host "    [OK] La Papelera de Reciclaje está ACTIVA (Protección contra borrados accidentales)." -ForegroundColor Green
+            Write-Host "    [OK] La Papelera de Reciclaje esta ACTIVA (Protección contra borrados accidentales)." -ForegroundColor Green
             } else {
                 Write-Host "    [PELIGRO] La Papelera de Reciclaje está DESACTIVADA." -ForegroundColor Red
             }
@@ -172,6 +173,46 @@ do {
             Pause
             }
         "12"{
+            Write-Host "--- RESTAURANDO USUARIOS DESDE BACKUP ---" -ForegroundColor Cyan
+    
+            # 1. Buscar el archivo más reciente en la carpeta
+            $archivoBackup = Get-ChildItem -Path "$PSScriptRoot\Backup_Users_*.csv" | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+    
+            if (-not $archivoBackup) {
+            Write-Host "Error: No se ha encontrado ningún archivo de backup en $PSScriptRoot" -ForegroundColor Red
+            } else {
+            Write-Host "Usando el backup más reciente: $($archivoBackup.Name)" -ForegroundColor Yellow
+            $confirmar = Read-Host "¿Estás seguro de que quieres importar estos usuarios? (S/N)"
+        
+            if ($confirmar -eq "S") {
+            $usuarios = Import-Csv -Path $archivoBackup.FullName
+            
+            foreach ($u in $usuarios) {
+                # Verificamos si el usuario ya existe para no dar error
+                if (-not (Get-ADUser -Filter "SamAccountName -eq '$($u.SamAccountName)'")) {
+                    Write-Host "Restaurando usuario: $($u.SamAccountName)..." -ForegroundColor Gray
+                    
+                    # Creamos el usuario con los datos básicos del CSV
+                    # Nota: La contraseña no se guarda en el CSV por seguridad, pondremos una por defecto
+                    $password = ConvertTo-SecureString "Password2026!" -AsPlainText -Force
+                    
+                    New-ADUser -Name $u.Name `
+                               -SamAccountName $u.SamAccountName `
+                               -UserPrincipalName $u.UserPrincipalName `
+                               -AccountPassword $password `
+                               -Enabled $true `
+                               -DisplayName $u.DisplayName
+                               
+                    Write-Host " [OK] $($u.SamAccountName) restaurado." -ForegroundColor Green
+                } else {
+                    Write-Host " [!] El usuario $($u.SamAccountName) ya existe, saltando..." -ForegroundColor Yellow
+                }
+                }
+                }
+                }
+                    Pause
+                }
+        "13"{
             Write-Host "Saliendo del gestor..." -ForegroundColor Gray
             return
         }
