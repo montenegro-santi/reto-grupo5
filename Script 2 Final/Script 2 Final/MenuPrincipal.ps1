@@ -201,54 +201,80 @@ do {
             Pause
             }
         "12"{
-    $archivo = Get-ChildItem -Path "$PSScriptRoot\Backup_Total_*.csv" | Sort-Object LastWriteTime -Descending | Select-Object -First 1
-    if ($archivo) {
-        # Importamos con UTF8 para mantener las tildes originales
-        $datos = Import-Csv -Path $archivo.FullName -Encoding UTF8
-        $dominioRaiz = (Get-ADDomain).DistinguishedName
+            $archivo = Get-ChildItem -Path "$PSScriptRoot\Backup_Total_*.csv" | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+            if ($archivo) {
+                # Importamos con UTF8 para que respete las tildes de los nombres de usuario
+                $datos = Import-Csv -Path $archivo.FullName -Encoding UTF8
+                $dominioRaiz = (Get-ADDomain).DistinguishedName
 
-        Write-Host "--- RESTAURANDO TODO EN ORDEN ---" -ForegroundColor Cyan
+                Write-Host "--- INICIANDO RESTAURACION JERARQUICA TOTAL ---" -ForegroundColor Cyan
 
-        foreach ($obj in $datos) {
-            $nombre = $obj.Name
-            $dnOriginal = $obj.DistinguishedName
-            
-            # PASO A: Crear las OUs (ya vienen primero en el CSV)
-            if ($obj.ObjectClass -eq "organizationalUnit") {
-                $partes = $dnOriginal.Split(",") | Where-Object { $_ -like "OU=*" }
-                $rutaActual = $dominioRaiz
-                for ($i = $partes.Count - 1; $i -ge 0; $i--) {
-                    $ouNombre = $partes[$i].ToString().Replace("OU=", "")
-                    if (-not (Get-ADOrganizationalUnit -Filter "Name -eq '$ouNombre'" -SearchBase $rutaActual -SearchScope OneLevel)) {
-                        New-ADOrganizationalUnit -Name $ouNombre -Path $rutaActual
-                        Write-Host "[OK] Carpeta creada: $ouNombre" -ForegroundColor Green
+                # PASO 1: Crear Unidades Organizativas (OUs)
+                # Las filtramos primero para asegurar que los 'cajones' existan
+                foreach ($obj in $datos | Where-Object { $_.ObjectClass -eq "organizationalUnit" }) {
+                    $dnOriginal = $obj.DistinguishedName
+                    $partes = $dnOriginal.Split(",") | Where-Object { $_ -like "OU=*" }
+                    $rutaActual = $dominioRaiz
+                    
+                    for ($i = $partes.Count - 1; $i -ge 0; $i--) {
+                        $ouNombre = $partes[$i].ToString().Replace("OU=", "")
+                        if (-not (Get-ADOrganizationalUnit -Filter "Name -eq '$ouNombre'" -SearchBase $rutaActual -SearchScope OneLevel)) {
+                            New-ADOrganizationalUnit -Name $ouNombre -Path $rutaActual
+                            Write-Host "[OK] Carpeta creada: $ouNombre" -ForegroundColor Green
+                        }
+                        $rutaActual = "OU=$ouNombre,$rutaActual"
                     }
-                    $rutaActual = "OU=$ouNombre,$rutaActual"
                 }
+
+                # PASO 2: Crear Grupos de Seguridad
+                # Es vital que existan antes que los usuarios para que no haya errores de membresia
+                foreach ($obj in $datos | Where-Object { $_.ObjectClass -eq "group" }) {
+                    $nombre = $obj.Name
+                    if (-not (Get-ADGroup -Filter "Name -eq '$nombre'")) {
+                        $dnOriginal = $obj.DistinguishedName
+                        $padreDN = $dnOriginal.Substring($dnOriginal.IndexOf(",") + 1)
+                        
+                        New-ADGroup -Name $nombre -SamAccountName $nombre -GroupScope Global -GroupCategory Security -Path $padreDN
+                        Write-Host "[OK] Grupo restaurado: $nombre" -ForegroundColor Yellow
+                    }
+                }
+
+                # PASO 3: Crear Usuarios y Equipos
+                foreach ($obj in $datos | Where-Object { $_.ObjectClass -eq "user" -or $_.ObjectClass -eq "computer" }) {
+                    $nombre = $obj.Name
+                    $dnOriginal = $obj.DistinguishedName
+                    $padreDN = $dnOriginal.Substring($dnOriginal.IndexOf(",") + 1)
+
+                    # Logica para USUARIOS
+                    if ($obj.ObjectClass -eq "user" -and $obj.SamAccountName -ne "Administrator") {
+                        if (-not (Get-ADUser -Filter "SamAccountName -eq '$($obj.SamAccountName)'")) {
+                            $pass = ConvertTo-SecureString "Password2026!" -AsPlainText -Force
+                            New-ADUser -Name $nombre -SamAccountName $obj.SamAccountName -AccountPassword $pass -Enabled $true -Path $padreDN
+                            Write-Host "[OK] Usuario restaurado: $nombre" -ForegroundColor White
+                        }
+                    }
+                    # Logica para EQUIPOS
+                    elseif ($obj.ObjectClass -eq "computer") {
+                        if (-not (Get-ADComputer -Filter "Name -eq '$nombre'")) {
+                            # Pausa de medio segundo para que el AD asimile las OUs creadas
+                            Start-Sleep -Milliseconds 500
+                            try {
+                                New-ADComputer -Name $nombre -SamAccountName "$nombre$" -Path $padreDN -ErrorAction SilentlyContinue
+                                Write-Host "[OK] Equipo restaurado: $nombre" -ForegroundColor Gray
+                            } catch {
+                                # Si la OU falla, lo crea en la ruta por defecto para no perder el equipo
+                                New-ADComputer -Name $nombre -SamAccountName "$nombre$" -ErrorAction SilentlyContinue
+                                Write-Host "[!] Equipo $nombre creado en contenedor por defecto" -ForegroundColor Magenta
+                            }
+                        }
+                    }
+                }
+            } else {
+                Write-Host "No se encontro ningun archivo de backup CSV." -ForegroundColor Red
             }
-            # PASO B: Crear Usuarios y Equipos en su sitio correspondiente
-            else {
-                $posComa = $dnOriginal.IndexOf(",")
-                $padreDN = $dnOriginal.Substring($posComa + 1)
-
-                if ($obj.ObjectClass -eq "user" -and $obj.SamAccountName -ne "Administrator") {
-                    if (-not (Get-ADUser -Filter "SamAccountName -eq '$($obj.SamAccountName)'")) {
-                        $pass = ConvertTo-SecureString "Password2026!" -AsPlainText -Force
-                        New-ADUser -Name $nombre -SamAccountName $obj.SamAccountName -AccountPassword $pass -Enabled $true -Path $padreDN
-                        Write-Host "Usuario restaurado: $nombre" -ForegroundColor White
-                    }
-                }
-                elseif ($obj.ObjectClass -eq "computer") {
-                    if (-not (Get-ADComputer -Filter "Name -eq '$nombre'")) {
-                        New-ADComputer -Name $nombre -SamAccountName "$nombre$" -Path $padreDN
-                        Write-Host "Equipo restaurado: $nombre" -ForegroundColor Gray
-                    }
-                }
-            }
+            Write-Host "--- PROCESO DE RESTAURACION FINALIZADO ---" -ForegroundColor Cyan
+            Pause
         }
-    }
-    Pause
-}
         "13"{
             Write-Host "Saliendo del gestor..." -ForegroundColor Gray
             return
