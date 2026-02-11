@@ -39,7 +39,7 @@ function Ejecutar-Rollback {
 function Mostrar-Menu {
     Clear-Host
     Write-Host "==============================================" -ForegroundColor Green
-    Write-Host "   GESTOR AUTOMÁTICO PARA: $dominioNombre " -ForegroundColor Green
+    Write-Host "   GESTOR AUTOMATICO PARA: $dominioNombre " -ForegroundColor Green
     Write-Host "==============================================" -ForegroundColor Green
     Write-Host "1. Crear Usuarios y Grupos"
     Write-Host "2. Crear Objetos de Equipo"
@@ -53,7 +53,7 @@ function Mostrar-Menu {
 
 do {
     Mostrar-Menu
-    $opcion = Read-Host "Selecciona una opción"
+    $opcion = Read-Host "Selecciona una opcion"
 
     switch ($opcion) {
         "1" { 
