@@ -23,7 +23,7 @@ function Ejecutar-Rollback {
             Write-Host "Limpiando infraestructura..." -ForegroundColor Yellow
             
             # 1. Desbloqueamos la protección contra borrado accidental de la OU y sus subcarpetas
-            Get-ADOrganizationalUnit -Filter "DistinguishedName -like '*OU=Empresa,$domainDN'" | 
+           Get-ADOrganizationalUnit -Identity $targetOU | 
                 Set-ADObject -ProtectedFromAccidentalDeletion $false
             
             # 2. Borramos la OU raíz y todo lo que tiene dentro (Recursivo)
