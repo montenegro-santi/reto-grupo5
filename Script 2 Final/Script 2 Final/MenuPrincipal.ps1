@@ -75,69 +75,64 @@ do {
             Pause
         }
        "4" {
-        Write-Host "--- AUTOMATIZACION TOTAL: 4 EQUIPOS POR RAMA ---" -ForegroundColor Cyan
+        Write-Host "--- FORZANDO DESPLIEGUE EN LAS 5 RAMAS ---" -ForegroundColor Cyan
         $dominioDN = (Get-ADDomain).DistinguishedName
         $upnSuffix = (Get-ADDomain).DNSRoot
         $departamentos = @("Finanzas", "IT", "RRHH", "Soporte", "Ventas")
 
-        # PASO 1: Crear Estructura de Carpetas (OUs)
-        $rutaEmpresa = "OU=Empresa,$dominioDN"
-        if (-not (Get-ADOrganizationalUnit -Filter "DistinguishedName -eq '$rutaEmpresa'" -ErrorAction SilentlyContinue)) {
-            New-ADOrganizationalUnit -Name "Empresa" -Path $dominioDN
-            Write-Host "[+] Creada OU: Empresa" -ForegroundColor Green
-        }
-
-        $rutaEquipos = "OU=Equipos,$rutaEmpresa"
-        if (-not (Get-ADOrganizationalUnit -Filter "DistinguishedName -eq '$rutaEquipos'" -ErrorAction SilentlyContinue)) {
-            New-ADOrganizationalUnit -Name "Equipos" -Path $rutaEmpresa
-            Write-Host "[+] Creada OU: Equipos" -ForegroundColor Green
-        }
-
-        # Aseguramos que las 5 sub-OUs existan antes de pasar al siguiente paso
-        foreach ($dep in $departamentos) {
-            $pathDep = "OU=$dep,$rutaEquipos"
-            if (-not (Get-ADOrganizationalUnit -Filter "DistinguishedName -eq '$pathDep'" -ErrorAction SilentlyContinue)) {
-                New-ADOrganizationalUnit -Name $dep -Path $rutaEquipos
-                Write-Host "  [+] Creada rama: $dep" -ForegroundColor Green
-            }
-        }
+        # 1. Asegurar que Empresa y Equipos existen (Base)
+        $rutaEquiposBase = "OU=Equipos,OU=Empresa,$dominioDN"
         
-        # Pausa de seguridad para que AD replique las nuevas carpetas
-        Start-Sleep -Seconds 2
+        # Intentamos crear la ruta base por si acaso no existe
+        try {
+            if (-not (Get-ADOrganizationalUnit -Filter "DistinguishedName -eq 'OU=Empresa,$dominioDN'" -ErrorAction SilentlyContinue)) {
+                New-ADOrganizationalUnit -Name "Empresa" -Path $dominioDN
+            }
+            if (-not (Get-ADOrganizationalUnit -Filter "DistinguishedName -eq '$rutaEquiposBase'" -ErrorAction SilentlyContinue)) {
+                New-ADOrganizationalUnit -Name "Equipos" -Path "OU=Empresa,$dominioDN"
+            }
+        } catch { }
 
-        # PASO 2: Usuarios y Grupos (Creausuarios.ps1)
-        if (Test-Path ".\Creausuarios.ps1") {
-            Write-Host "[2/3] Ejecutando script de usuarios..." -ForegroundColor Yellow
-            .\Creausuarios.ps1 -CsvPath ".\usuarios.csv" -DomainDN $dominioDN -UpnSuffix $upnSuffix -Delimiter ";"
-        }
-
-        # PASO 3: Generar 4 Equipos por Departamento
-        Write-Host "[3/3] Generando 4 PCs por cada unidad organizativa..." -ForegroundColor Yellow
+        # 2. Bucle principal para las 5 ramas
         foreach ($dep in $departamentos) {
-            # IMPORTANTE: Definimos la ruta exacta de nuevo aquí
-            $destinoPC = "OU=$dep,OU=Equipos,OU=Empresa,$dominioDN"
+            $pathDep = "OU=$dep,$rutaEquiposBase"
             
-            # Lógica de nombre (Ya la tenías bien, la mantenemos)
+            Write-Host "`n> Procesando rama: $dep" -ForegroundColor Yellow
+
+            # FORZAR CREACIÓN DE LA OU DEL DEPARTAMENTO
+            if (-not (Get-ADOrganizationalUnit -Filter "DistinguishedName -eq '$pathDep'" -ErrorAction SilentlyContinue)) {
+                New-ADOrganizationalUnit -Name $dep -Path $rutaEquiposBase
+                Write-Host "  [+] Rama $dep creada ahora mismo." -ForegroundColor Green
+                Start-Sleep -Milliseconds 500 # Breve pausa para que AD la reconozca
+            }
+
+            # Lógica de nombre (Parche IT incluido)
             $prefijo = if ($dep.Length -ge 3) { $dep.Substring(0,3).ToUpper() } else { $dep.ToUpper() }
 
+            # 3. Crear los 4 equipos
             for ($i = 1; $i -le 4; $i++) {
                 $nombrePC = "${prefijo}-PC0$i"
                 
                 try {
-                    # Verificamos existencia con ErrorAction SilentlyContinue para evitar rojos innecesarios
+                    # Si el equipo no existe, lo creamos
                     if (-not (Get-ADComputer -Filter "Name -eq '$nombrePC'" -ErrorAction SilentlyContinue)) {
-                        New-ADComputer -Name $nombrePC -SamAccountName "${nombrePC}$" -Path $destinoPC -Enabled $true
-                        Write-Host "    [OK] Creado: ${nombrePC} en ${dep}" -ForegroundColor Gray
+                        New-ADComputer -Name $nombrePC -SamAccountName "${nombrePC}$" -Path $pathDep -Enabled $true
+                        Write-Host "    [OK] ${nombrePC} creado en ${dep}" -ForegroundColor Gray
                     } else {
-                        Write-Host "    [-] Saltado: ${nombrePC} ya existe" -ForegroundColor DarkGray
+                        Write-Host "    [-] ${nombrePC} ya existía." -ForegroundColor DarkGray
                     }
                 } catch {
-                    # Usamos ${nombrePC} con llaves para evitar el error de los dos puntos (:)
                     Write-Host "    [!] Error en ${nombrePC}: $($_.Exception.Message)" -ForegroundColor Red
                 }
             }
         }
-        Write-Host "--- AUTOMATIZACION FINALIZADA ---" -ForegroundColor Green
+
+        # Llamada al script de usuarios (si existe)
+        if (Test-Path ".\Creausuarios.ps1") {
+            .\Creausuarios.ps1 -CsvPath ".\usuarios.csv" -DomainDN $dominioDN -UpnSuffix $upnSuffix -Delimiter ";"
+        }
+
+        Write-Host "`n--- PROCESO COMPLETADO ---" -ForegroundColor Green
         Pause
     }
         "5" {
