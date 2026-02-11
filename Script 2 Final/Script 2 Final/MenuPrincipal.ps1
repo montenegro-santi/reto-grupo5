@@ -129,21 +129,29 @@ do {
             }
             Pause
             }   
-        "10" {
-            $fecha = Get-Date -Format "yyyyMMdd_HHmm"
-            $rutaFinal = "$PSScriptRoot\Backup_Total_$fecha.csv"
+        "10"{
+    $fecha = Get-Date -Format "yyyyMMdd_HHmm"
+    $rutaFinal = "$PSScriptRoot\Backup_Total_$fecha.csv"
     
-            Write-Host "Generando Backup Total (Usuarios, Grupos y OUs)..." -ForegroundColor Yellow
+    Write-Host "Generando Backup Total ordenado por jerarquia..." -ForegroundColor Yellow
     
-            # Exportamos todos los objetos con sus propiedades críticas y forzamos UTF8
-            Get-ADObject -Filter * -IncludeDeletedObjects -Properties * | 
-            Select-Object Name, ObjectClass, DistinguishedName, SamAccountName, Category | 
-            Export-Csv -Path $rutaFinal -NoTypeInformation -Encoding UTF8
+    # Obtenemos todos los objetos
+    $todosLosObjetos = Get-ADObject -Filter * -IncludeDeletedObjects -Properties * | 
+                       Select-Object Name, ObjectClass, DistinguishedName, SamAccountName, Category
+
+    # Los ordenamos: Primero OUs, luego Grupos, luego el resto (Usuarios y Equipos)
+    $objetosOrdenados = $todosLosObjetos | Sort-Object {
+        if ($_.ObjectClass -eq "organizationalUnit") { 1 }
+        elseif ($_.ObjectClass -eq "group") { 2 }
+        else { 3 }
+    }
+
+    $objetosOrdenados | Export-Csv -Path $rutaFinal -NoTypeInformation -Encoding UTF8
     
-            Write-Host "¡Backup Total creado con exito!" -ForegroundColor Green
-            Write-Host "Ubicacion: $rutaFinal" -ForegroundColor Cyan
-            Pause
-            }
+    Write-Host "Backup Total creado y ordenado con exito!" -ForegroundColor Green
+    Write-Host "Ubicacion: $rutaFinal" -ForegroundColor Cyan
+    Pause
+}
         "11"{
             Write-Host "`n--- AUDITORÍA PROACTIVA DE SEGURIDAD ---" -ForegroundColor Cyan -BackgroundColor Black
     
@@ -184,48 +192,46 @@ do {
         "12"{
     $archivo = Get-ChildItem -Path "$PSScriptRoot\Backup_Total_*.csv" | Sort-Object LastWriteTime -Descending | Select-Object -First 1
     if ($archivo) {
-        # Cargamos los datos con UTF8 para mantener las tildes
+        # Importamos con UTF8 para mantener las tildes originales
         $datos = Import-Csv -Path $archivo.FullName -Encoding UTF8
         $dominioRaiz = (Get-ADDomain).DistinguishedName
 
-        Write-Host "--- INICIANDO RESTAURACION JERARQUICA ---" -ForegroundColor Cyan
+        Write-Host "--- RESTAURANDO TODO EN ORDEN ---" -ForegroundColor Cyan
 
-        # PASO 1: Crear todas las OUs primero
-        foreach ($obj in $datos | Where-Object { $_.ObjectClass -eq "organizationalUnit" }) {
-            $partes = $obj.DistinguishedName.Split(",") | Where-Object { $_ -like "OU=*" }
-            $rutaActual = $dominioRaiz
-            for ($i = $partes.Count - 1; $i -ge 0; $i--) {
-                $ouNombre = $partes[$i].ToString().Replace("OU=", "")
-                if (-not (Get-ADOrganizationalUnit -Filter "Name -eq '$ouNombre'" -SearchBase $rutaActual -SearchScope OneLevel)) {
-                    New-ADOrganizationalUnit -Name $ouNombre -Path $rutaActual
-                    Write-Host "[OK] Carpeta creada: $ouNombre" -ForegroundColor Green
-                }
-                $rutaActual = "OU=$ouNombre,$rutaActual"
-            }
-        }
-
-        # PASO 2: Crear Grupos, Usuarios y Equipos (ahora que las OUs existen)
-        foreach ($obj in $datos | Where-Object { $_.ObjectClass -ne "organizationalUnit" }) {
+        foreach ($obj in $datos) {
             $nombre = $obj.Name
-            $padreDN = $obj.DistinguishedName.Substring($obj.DistinguishedName.IndexOf(",") + 1)
+            $dnOriginal = $obj.DistinguishedName
+            
+            # PASO A: Crear las OUs (ya vienen primero en el CSV)
+            if ($obj.ObjectClass -eq "organizationalUnit") {
+                $partes = $dnOriginal.Split(",") | Where-Object { $_ -like "OU=*" }
+                $rutaActual = $dominioRaiz
+                for ($i = $partes.Count - 1; $i -ge 0; $i--) {
+                    $ouNombre = $partes[$i].ToString().Replace("OU=", "")
+                    if (-not (Get-ADOrganizationalUnit -Filter "Name -eq '$ouNombre'" -SearchBase $rutaActual -SearchScope OneLevel)) {
+                        New-ADOrganizationalUnit -Name $ouNombre -Path $rutaActual
+                        Write-Host "[OK] Carpeta creada: $ouNombre" -ForegroundColor Green
+                    }
+                    $rutaActual = "OU=$ouNombre,$rutaActual"
+                }
+            }
+            # PASO B: Crear Usuarios y Equipos en su sitio correspondiente
+            else {
+                $posComa = $dnOriginal.IndexOf(",")
+                $padreDN = $dnOriginal.Substring($posComa + 1)
 
-            if ($obj.ObjectClass -eq "user" -and $obj.SamAccountName -ne "Administrator") {
-                if (-not (Get-ADUser -Filter "SamAccountName -eq '$($obj.SamAccountName)'")) {
-                    $pass = ConvertTo-SecureString "Password2026!" -AsPlainText -Force
-                    New-ADUser -Name $nombre -SamAccountName $obj.SamAccountName -AccountPassword $pass -Enabled $true -Path $padreDN
-                    Write-Host "Usuario restaurado: $nombre" -ForegroundColor White
+                if ($obj.ObjectClass -eq "user" -and $obj.SamAccountName -ne "Administrator") {
+                    if (-not (Get-ADUser -Filter "SamAccountName -eq '$($obj.SamAccountName)'")) {
+                        $pass = ConvertTo-SecureString "Password2026!" -AsPlainText -Force
+                        New-ADUser -Name $nombre -SamAccountName $obj.SamAccountName -AccountPassword $pass -Enabled $true -Path $padreDN
+                        Write-Host "Usuario restaurado: $nombre" -ForegroundColor White
+                    }
                 }
-            }
-            elseif ($obj.ObjectClass -eq "computer") {
-                if (-not (Get-ADComputer -Filter "Name -eq '$nombre'")) {
-                    New-ADComputer -Name $nombre -SamAccountName "$nombre$" -Path $padreDN
-                    Write-Host "Equipo restaurado: $nombre" -ForegroundColor Gray
-                }
-            }
-            elseif ($obj.ObjectClass -eq "group") {
-                if (-not (Get-ADGroup -Filter "Name -eq '$nombre'")) {
-                    New-ADGroup -Name $nombre -GroupScope Global -Path $padreDN
-                    Write-Host "Grupo restaurado: $nombre" -ForegroundColor Yellow
+                elseif ($obj.ObjectClass -eq "computer") {
+                    if (-not (Get-ADComputer -Filter "Name -eq '$nombre'")) {
+                        New-ADComputer -Name $nombre -SamAccountName "$nombre$" -Path $padreDN
+                        Write-Host "Equipo restaurado: $nombre" -ForegroundColor Gray
+                    }
                 }
             }
         }
