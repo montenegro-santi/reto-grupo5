@@ -1,4 +1,5 @@
 #Requires -Modules ActiveDirectory
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 
 # --- DETECCIÓN AUTOMÁTICA DEL DOMINIO ---
 try {
