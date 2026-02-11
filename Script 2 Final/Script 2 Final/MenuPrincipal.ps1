@@ -75,67 +75,51 @@ do {
             Pause
         }
        "4" {
-        Write-Host "--- DESPLIEGUE TOTAL: ASEGURANDO ESTRUCTURA Y RAMAS ---" -ForegroundColor Cyan
+        Write-Host "--- DESPLIEGUE TOTAL DE INFRAESTRUCTURA ---" -ForegroundColor Cyan
         $dominioDN = (Get-ADDomain).DistinguishedName
         $departamentos = @("Finanzas", "IT", "RRHH", "Soporte", "Ventas")
 
-        # 1. Asegurar OUs principales (Empresa > Equipos)
+        # 1. Crear jerarquía base (Empresa > Equipos)
         $rutaEmpresa = "OU=Empresa,$dominioDN"
         if (-not (Get-ADOrganizationalUnit -Filter "DistinguishedName -eq '$rutaEmpresa'" -ErrorAction SilentlyContinue)) {
             New-ADOrganizationalUnit -Name "Empresa" -Path $dominioDN
-            Write-Host "[+] Estructura: Empresa creada" -ForegroundColor Green
+            Write-Host "[+] Estructura base Empresa creada" -ForegroundColor Green
         }
 
         $rutaEquiposBase = "OU=Equipos,$rutaEmpresa"
         if (-not (Get-ADOrganizationalUnit -Filter "DistinguishedName -eq '$rutaEquiposBase'" -ErrorAction SilentlyContinue)) {
             New-ADOrganizationalUnit -Name "Equipos" -Path $rutaEmpresa
-            Write-Host "[+] Estructura: Equipos creada" -ForegroundColor Green
+            Write-Host "[+] Estructura base Equipos creada" -ForegroundColor Green
         }
 
-        # 2. Procesar departamentos
+        # 2. Crear ramas y equipos
         foreach ($dep in $departamentos) {
             $pathDep = "OU=$dep,$rutaEquiposBase"
-            Write-Host "`n> Rama: $dep" -ForegroundColor Yellow
+            Write-Host " >> Procesando rama $dep" -ForegroundColor Yellow
 
             if (-not (Get-ADOrganizationalUnit -Filter "DistinguishedName -eq '$pathDep'" -ErrorAction SilentlyContinue)) {
-                try {
-                    New-ADOrganizationalUnit -Name $dep -Path $rutaEquiposBase
-                    Write-Host "  [+] Carpeta $dep creada" -ForegroundColor Green
-                    Start-Sleep -Milliseconds 300
-                } catch {
-                    # CORRECCIÓN: Usamos ${dep} para que los ":" no den error
-                    Write-Host "  [!] Error critico en rama ${dep}: $($_.Exception.Message)" -ForegroundColor Red
-                    continue 
-                }
+                New-ADOrganizationalUnit -Name $dep -Path $rutaEquiposBase
+                Start-Sleep -Milliseconds 200
             }
 
-            # Lógica de prefijo (Parche IT)
             $prefijo = if ($dep.Length -ge 3) { $dep.Substring(0,3).ToUpper() } else { $dep.ToUpper() }
 
-            # 3. Crear o Mover Equipos
             for ($i = 1; $i -le 4; $i++) {
                 $nombrePC = "${prefijo}-PC0$i"
                 try {
                     $objPC = Get-ADComputer -Filter "Name -eq '$nombrePC'" -ErrorAction SilentlyContinue
-                    
                     if (-not $objPC) {
                         New-ADComputer -Name $nombrePC -SamAccountName "${nombrePC}$" -Path $pathDep -Enabled $true
-                        Write-Host "    [NUEVO] ${nombrePC} en ${dep}" -ForegroundColor Gray
-                    } 
-                    elseif ($objPC.DistinguishedName -notlike "*$pathDep*") {
+                        Write-Host "    [NUEVO] $nombrePC en $dep" -ForegroundColor Gray
+                    } elseif ($objPC.DistinguishedName -notlike "*$pathDep*") {
                         Move-ADObject -Identity $objPC.DistinguishedName -TargetPath $pathDep
-                        Write-Host "    [MOVIDO] ${nombrePC} -> ${dep}" -ForegroundColor Blue
-                    }
-                    else {
-                        Write-Host "    [OK] ${nombrePC} ya esta en su sitio" -ForegroundColor DarkGray
+                        Write-Host "    [MOVIDO] $nombrePC a $dep" -ForegroundColor Blue
                     }
                 } catch {
-                    # CORRECCIÓN: Usamos ${nombrePC} para evitar el error de unidad de disco
-                    Write-Host "    [!] Error en ${nombrePC}: $($_.Exception.Message)" -ForegroundColor Red
+                    Write-Host "    [!] Error en objeto $nombrePC" -ForegroundColor Red
                 }
             }
         }
-        Write-Host "`n--- PROCESO FINALIZADO ---" -ForegroundColor Green
         Pause
     }
         "5" {
@@ -244,75 +228,50 @@ do {
             Pause
             }
         "12"{
-            Write-Host "--- INICIANDO RESTAURACION TOTAL ---" -ForegroundColor Cyan
-            $archivo = Get-ChildItem -Path "$PSScriptRoot\Backup_Total_*.csv" | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+            Write-Host "--- RESTAURACION DESDE BACKUP ---" -ForegroundColor Cyan
+            $backup = Get-ChildItem -Path "$PSScriptRoot\Backup_Total_*.csv" | Sort-Object LastWriteTime -Descending | Select-Object -First 1
 
-            if ($archivo) {
-                $datos = Import-Csv -Path $archivo.FullName -Encoding UTF8
+            if ($backup) {
+                $datos = Import-Csv -Path $backup.FullName -Encoding UTF8
                 $dominioDN = (Get-ADDomain).DistinguishedName
 
-                # PASO 0: Crear la estructura base obligatoria
-                $rutasBase = @("Empresa", "Equipos", "Usuarios", "Grupos")
-                foreach ($nombre in $rutasBase) {
-                    $dnBase = if ($nombre -eq "Empresa") { "OU=Empresa,$dominioDN" } else { "OU=$nombre,OU=Empresa,$dominioDN" }
-                    $padreDN = if ($nombre -eq "Empresa") { $dominioDN } else { "OU=Empresa,$dominioDN" }
-                    
-                    if (-not (Get-ADOrganizationalUnit -Filter "DistinguishedName -eq '$dnBase'" -ErrorAction SilentlyContinue)) {
-                        New-ADOrganizationalUnit -Name $nombre -Path $padreDN
-                        Write-Host "[+] Estructura base creada $nombre" -ForegroundColor Green
+                # Crear OUs base para evitar errores de ruta no encontrada
+                $bases = @("Empresa", "Equipos", "Usuarios", "Grupos")
+                foreach ($b in $bases) {
+                    $target = if ($b -eq "Empresa") { "OU=Empresa,$dominioDN" } else { "OU=$b,OU=Empresa,$dominioDN" }
+                    $parent = if ($b -eq "Empresa") { $dominioDN } else { "OU=Empresa,$dominioDN" }
+                    if (-not (Get-ADOrganizationalUnit -Filter "DistinguishedName -eq '$target'" -ErrorAction SilentlyContinue)) {
+                        New-ADOrganizationalUnit -Name $b -Path $parent -ErrorAction SilentlyContinue
                     }
                 }
 
-                # PASO 1: Restaurar OUs de Departamentos (Evita ObjectNotFound)
-                Write-Host "[1/4] Restaurando Unidades Organizativas..." -ForegroundColor White
-                $datos | Where-Object { $_.ObjectClass -eq "organizationalUnit" -and $_.Name -notin $rutasBase } | ForEach-Object {
-                    $ou = $_
-                    if (-not (Get-ADOrganizationalUnit -Filter "DistinguishedName -eq '$($ou.DistinguishedName)'" -ErrorAction SilentlyContinue)) {
-                        $rutaPadre = $ou.DistinguishedName -replace "^OU=[^,]+,",""
-                        try {
-                            New-ADOrganizationalUnit -Name $ou.Name -Path $rutaPadre -ErrorAction SilentlyContinue
-                            Write-Host "  [OK] OU creada $($ou.Name)" -ForegroundColor Gray
-                        } catch { }
+                # Restaurar todo lo demás
+                $datos | ForEach-Object {
+                    $item = $_
+                    $clase = $item.ObjectClass
+                    if ($clase -eq "organizationalUnit" -and $item.Name -notin $bases) {
+                        $parentOU = $item.DistinguishedName -replace "^OU=[^,]+,",""
+                        if (-not (Get-ADOrganizationalUnit -Filter "DistinguishedName -eq '$($item.DistinguishedName)'" -ErrorAction SilentlyContinue)) {
+                            New-ADOrganizationalUnit -Name $item.Name -Path $parentOU -ErrorAction SilentlyContinue
+                        }
+                    }
+                    elseif ($clase -eq "user" -and $item.SamAccountName -ne "Administrator") {
+                        if (-not (Get-ADUser -Filter "SamAccountName -eq '$($item.SamAccountName)'" -ErrorAction SilentlyContinue)) {
+                            $parentU = $item.DistinguishedName -replace "^CN=[^,]+,",""
+                            $secPass = ConvertTo-SecureString "Password2026!" -AsPlainText -Force
+                            New-ADUser -Name $item.Name -SamAccountName $item.SamAccountName -Path $parentU -AccountPassword $secPass -Enabled $true -ErrorAction SilentlyContinue
+                            Write-Host " [+] Usuario restaurado $($item.SamAccountName)" -ForegroundColor White
+                        }
+                    }
+                    elseif ($clase -eq "computer") {
+                        if (-not (Get-ADComputer -Filter "Name -eq '$($item.Name)'" -ErrorAction SilentlyContinue)) {
+                            $parentC = $item.DistinguishedName -replace "^CN=[^,]+,",""
+                            New-ADComputer -Name $item.Name -SamAccountName "$($item.Name)$" -Path $parentC -Enabled $true -ErrorAction SilentlyContinue
+                        }
                     }
                 }
-
-                # PASO 2: Restaurar Grupos
-                Write-Host "[2/4] Restaurando Grupos..." -ForegroundColor White
-                $datos | Where-Object { $_.ObjectClass -eq "group" } | ForEach-Object {
-                    $gp = $_
-                    if (-not (Get-ADGroup -Filter "SamAccountName -eq '$($gp.SamAccountName)'" -ErrorAction SilentlyContinue)) {
-                        $rutaPadre = $gp.DistinguishedName -replace "^CN=[^,]+,",""
-                        New-ADGroup -Name $gp.Name -SamAccountName $gp.SamAccountName -GroupScope Global -Path $rutaPadre -ErrorAction SilentlyContinue
-                    }
-                }
-
-                # PASO 3: Usuarios y Membresias
-                Write-Host "[3/4] Restaurando Usuarios..." -ForegroundColor White
-                $datos | Where-Object { $_.ObjectClass -eq "user" -and $_.SamAccountName -ne "Administrator" } | ForEach-Object {
-                    $u = $_
-                    if (-not (Get-ADUser -Filter "SamAccountName -eq '$($u.SamAccountName)'" -ErrorAction SilentlyContinue)) {
-                        $rutaPadre = $u.DistinguishedName -replace "^CN=[^,]+,",""
-                        $pass = ConvertTo-SecureString "Password2026!" -AsPlainText -Force
-                        New-ADUser -Name $u.Name -SamAccountName $u.SamAccountName -Path $rutaPadre -AccountPassword $pass -Enabled $true -ErrorAction SilentlyContinue
-                        Write-Host "  [OK] Usuario $($u.SamAccountName)" -ForegroundColor Gray
-                    }
-                }
-
-                # PASO 4: Restaurar Equipos
-                Write-Host "[4/4] Restaurando Equipos..." -ForegroundColor White
-                $datos | Where-Object { $_.ObjectClass -eq "computer" } | ForEach-Object {
-                    $pc = $_
-                    if (-not (Get-ADComputer -Filter "Name -eq '$($pc.Name)'" -ErrorAction SilentlyContinue)) {
-                        $rutaPadre = $pc.DistinguishedName -replace "^CN=[^,]+,",""
-                        New-ADComputer -Name $pc.Name -SamAccountName "$($pc.Name)$" -Path $rutaPadre -Enabled $true -ErrorAction SilentlyContinue
-                        Write-Host "  [OK] Equipo $($pc.Name)" -ForegroundColor Gray
-                    }
-                }
-
-            } else {
-                Write-Host "Error No hay archivos de backup" -ForegroundColor Red
             }
-            Write-Host "--- FIN DE RESTAURACION ---" -ForegroundColor Cyan
+            Write-Host "Proceso terminado" -ForegroundColor Green
             Pause
         }
         "13"{
