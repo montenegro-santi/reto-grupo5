@@ -75,45 +75,55 @@ do {
             Pause
         }
         "4" {
-    Write-Host "--- INICIANDO AUTOMATIZACION TOTAL (ESTRUCTURA COMPLETA) ---" -ForegroundColor Cyan
+    Write-Host "--- INICIANDO AUTOMATIZACION TOTAL (VERSION FINAL) ---" -ForegroundColor Cyan
     $dominioDN = (Get-ADDomain).DistinguishedName
     $upnSuffix = (Get-ADDomain).DNSRoot
     $departamentos = @("Finanzas", "IT", "RRHH", "Soporte", "Ventas")
 
-    # PASO 1: Crear la estructura base de carpetas (OUs)
-    Write-Host "[1/3] Asegurando estructura de carpetas de Equipos..." -ForegroundColor Yellow
+    # --- PASO 1: CREAR ESTRUCTURA BASE ---
+    Write-Host "[1/3] Construyendo jerarquia de carpetas..." -ForegroundColor Yellow
+    
+    # 1.1 Asegurar 'Empresa'
     $rutaEmpresa = "OU=Empresa,$dominioDN"
-    $rutaEquiposBase = "OU=Equipos,$rutaEmpresa"
-
-    # Creamos 'Equipos' dentro de 'Empresa' si no existe
-    if (-not (Get-ADOrganizationalUnit -Filter "DistinguishedName -eq '$rutaEquiposBase'" -ErrorAction SilentlyContinue)) {
-        New-ADOrganizationalUnit -Name "Equipos" -Path $rutaEmpresa
+    if (-not (Get-ADOrganizationalUnit -Filter "DistinguishedName -eq '$rutaEmpresa'" -ErrorAction SilentlyContinue)) {
+        New-ADOrganizationalUnit -Name "Empresa" -Path $dominioDN
+        Write-Host "  [+] Creada OU: Empresa" -ForegroundColor Green
     }
 
-    # Creamos cada departamento dentro de Equipos
+    # 1.2 Asegurar 'Equipos' dentro de 'Empresa'
+    $rutaEquiposBase = "OU=Equipos,$rutaEmpresa"
+    if (-not (Get-ADOrganizationalUnit -Filter "DistinguishedName -eq '$rutaEquiposBase'" -ErrorAction SilentlyContinue)) {
+        New-ADOrganizationalUnit -Name "Equipos" -Path $rutaEmpresa
+        Write-Host "  [+] Creada OU: Equipos" -ForegroundColor Green
+    }
+
+    # 1.3 Crear departamentos dentro de Equipos
     foreach ($dep in $departamentos) {
-        $rutaDepEquipo = "OU=$dep,$rutaEquiposBase"
-        if (-not (Get-ADOrganizationalUnit -Filter "DistinguishedName -eq '$rutaDepEquipo'" -ErrorAction SilentlyContinue)) {
+        $rutaDep = "OU=$dep,$rutaEquiposBase"
+        if (-not (Get-ADOrganizationalUnit -Filter "DistinguishedName -eq '$rutaDep'" -ErrorAction SilentlyContinue)) {
             New-ADOrganizationalUnit -Name $dep -Path $rutaEquiposBase
-            Write-Host "  > Carpeta de equipo creada: $dep" -ForegroundColor Green
+            Write-Host "  [+] Carpeta de equipo lista: $dep" -ForegroundColor Green
         }
     }
 
-    # PASO 2: Crear Usuarios y Grupos (Usando tu script existente)
-    Write-Host "[2/3] Creando Usuarios y Grupos de seguridad..." -ForegroundColor Yellow
+    # --- PASO 2: USUARIOS Y GRUPOS ---
+    Write-Host "[2/3] Ejecutando creacion de Usuarios y Grupos..." -ForegroundColor Yellow
     if (Test-Path ".\Creausuarios.ps1") {
+        # Esta parte ya crea la rama de 'Usuarios' automáticamente
         .\Creausuarios.ps1 -CsvPath ".\usuarios.csv" -DomainDN $dominioDN -UpnSuffix $upnSuffix -Delimiter ";"
     }
 
-    # PASO 3: Crear los Equipos dentro de las nuevas carpetas
-    Write-Host "[3/3] Asignando equipos a sus departamentos..." -ForegroundColor Yellow
+    # --- PASO 3: CREAR EQUIPOS ---
+    Write-Host "[3/3] Generando objetos de equipo..." -ForegroundColor Yellow
     foreach ($dep in $departamentos) {
-        $rutaDestino = "OU=$dep,$rutaEquiposBase"
+        $rutaDestino = "OU=$dep,OU=Equipos,OU=Empresa,$dominioDN"
         $nombrePC = "$($dep.Substring(0,3).ToUpper())-PC01"
         
-        if (-not (Get-ADComputer -Filter "Name -eq '$nombrePC'")) {
-            New-ADComputer -Name $nombrePC -SamAccountName "$nombrePC$" -Path $rutaDestino -Enabled $true
-            Write-Host "[OK] $nombrePC creado en $rutaDestino" -ForegroundColor Gray
+        if (Get-ADOrganizationalUnit -Identity $rutaDestino -ErrorAction SilentlyContinue) {
+            if (-not (Get-ADComputer -Filter "Name -eq '$nombrePC'")) {
+                New-ADComputer -Name $nombrePC -SamAccountName "$nombrePC$" -Path $rutaDestino -Enabled $true
+                Write-Host "  [OK] Equipo $nombrePC en su sitio." -ForegroundColor Gray
+            }
         }
     }
 
