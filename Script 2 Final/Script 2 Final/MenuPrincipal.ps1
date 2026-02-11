@@ -75,12 +75,12 @@ do {
             Pause
         }
        "4" {
-        Write-Host "--- AUTOMATIZACION TOTAL ---" -ForegroundColor Cyan
+        Write-Host "--- AUTOMATIZACION TOTAL: ESTRUCTURA Y 4 PCS POR RAMA ---" -ForegroundColor Cyan
         $dominioDN = (Get-ADDomain).DistinguishedName
         $upnSuffix = (Get-ADDomain).DNSRoot
         $departamentos = @("Finanzas", "IT", "RRHH", "Soporte", "Ventas")
 
-        # PASO 1: Estructura de OUs (Empresa > Equipos > Deps)
+        # PASO 1: Asegurar OUs de Equipos
         $rutaEmpresa = "OU=Empresa,$dominioDN"
         if (-not (Get-ADOrganizationalUnit -Filter "DistinguishedName -eq '$rutaEmpresa'" -ErrorAction SilentlyContinue)) {
             New-ADOrganizationalUnit -Name "Empresa" -Path $dominioDN
@@ -90,7 +90,6 @@ do {
         $rutaEquipos = "OU=Equipos,$rutaEmpresa"
         if (-not (Get-ADOrganizationalUnit -Filter "DistinguishedName -eq '$rutaEquipos'" -ErrorAction SilentlyContinue)) {
             New-ADOrganizationalUnit -Name "Equipos" -Path $rutaEmpresa
-            Start-Sleep -Seconds 1
         }
 
         foreach ($dep in $departamentos) {
@@ -100,23 +99,33 @@ do {
             }
         }
 
-        # PASO 2: Usuarios y Grupos (Creausuarios.ps1)
+        # PASO 2: Usuarios y Grupos
         if (Test-Path ".\Creausuarios.ps1") {
             .\Creausuarios.ps1 -CsvPath ".\usuarios.csv" -DomainDN $dominioDN -UpnSuffix $upnSuffix -Delimiter ";"
         }
 
-        # PASO 3: Creación de Equipos (PC01 para cada departamento)
-        Write-Host "[3/3] Creando objetos de equipo..." -ForegroundColor Yellow
+        # PASO 3: Creación de 4 Equipos por Departamento
+        Write-Host "[3/3] Generando 4 equipos por departamento..." -ForegroundColor Yellow
         foreach ($dep in $departamentos) {
             $destinoPC = "OU=$dep,$rutaEquipos"
-            $nombrePC = "$($dep.Substring(0,3).ToUpper())-PC01"
             
-            if (-not (Get-ADComputer -Filter "Name -eq '$nombrePC'")) {
-                New-ADComputer -Name $nombrePC -SamAccountName "$nombrePC$" -Path $destinoPC -Enabled $true
-                Write-Host "  [OK] Equipo creado $nombrePC" -ForegroundColor Gray
+            # Control de error para nombres cortos (evita el error de la captura image_c5b6d5.jpg)
+            $prefijo = if ($dep.Length -ge 3) { $dep.Substring(0,3).ToUpper() } else { $dep.ToUpper() }
+
+            for ($i = 1; $i -le 4; $i++) {
+                $nombrePC = "${prefijo}-PC0$i"
+                
+                try {
+                    if (-not (Get-ADComputer -Filter "Name -eq '$nombrePC'")) {
+                        New-ADComputer -Name $nombrePC -SamAccountName "$nombrePC$" -Path $destinoPC -Enabled $true
+                        Write-Host "  [OK] Creado: $nombrePC en $dep" -ForegroundColor Gray
+                    }
+                } catch {
+                    Write-Host "  [!] Error al crear ${nombrePC}" -ForegroundColor Red
+                }
             }
         }
-        Write-Host "--- PROCESO FINALIZADO ---" -ForegroundColor Green
+        Write-Host "--- PROCESO COMPLETADO ---" -ForegroundColor Green
         Pause
     }
         "5" {
