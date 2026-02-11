@@ -75,13 +75,24 @@ do {
             Pause
         }
         "4" {
-            Write-Host "Iniciando automatizacion total en $dominioNombre..." -ForegroundColor Yellow
-            .\Creausuarios.ps1 -CsvPath ".\usuarios.csv" -DomainDN $domainDN -UpnSuffix $upnSuffix
-            .\Computers.ps1 -CsvPath ".\equipos.csv"
-            .\moverequipos.ps1
-            Write-Host "Dominio configurado con exito!" -ForegroundColor Green
-            Pause
-        }
+    Write-Host "--- INICIANDO PROCESO DE AUTOMATIZACION COMPLETO ---" -ForegroundColor Cyan
+    
+    # 1. Crear Usuarios, OUs y GRUPOS (Esto llama a tu script Creausuarios.ps1)
+    Write-Host "[1/3] Creando estructura de OUs, Grupos y Usuarios..." -ForegroundColor Yellow
+    .\Creausuarios.ps1 -CsvPath ".\usuarios.csv" -DomainDN $domainDN -UpnSuffix $upnSuffix
+    
+    # 2. Crear Objetos de Equipo
+    Write-Host "[2/3] Creando objetos de equipo..." -ForegroundColor Yellow
+    # Asegúrate de que este script exista o usa la lógica de New-ADComputer
+    .\CreaEquipos.ps1 
+
+    # 3. Organizar Equipos
+    Write-Host "[3/3] Organizando equipos en sus departamentos..." -ForegroundColor Yellow
+    .\OrganizarEquipos.ps1
+
+    Write-Host "--- PROCESO FINALIZADO CON EXITO ---" -ForegroundColor Green
+    Pause
+}
         "5" {
             Write-Host "Abriendo archivos de registro..." -ForegroundColor Cyan
             if (Test-Path ".\provision-ad.log") { notepad ".\provision-ad.log" }
