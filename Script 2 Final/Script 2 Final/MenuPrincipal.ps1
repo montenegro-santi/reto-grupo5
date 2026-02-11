@@ -74,41 +74,80 @@ do {
             .\moverequipos.ps1
             Pause
         }
-       "4" {
-        Write-Host "--- INICIANDO PROCESO DE AUTOMATIZACION TOTAL ---" -ForegroundColor Cyan
-        
-        $dominioDN = (Get-ADDomain).DistinguishedName
-        # Definición explícita de las 5 ramas
-        $departamentos = @("Finanzas", "IT", "RRHH", "Soporte", "Ventas")
+       # --- CONFIGURACIÓN INICIAL ---
+$dominioDN = (Get-ADDomain).DistinguishedName
+$upnSuffix = (Get-ADDomain).DNSRoot
+$departamentos = @("Finanzas", "IT", "RRHH", "Soporte", "Ventas")
 
-        foreach ($dep in $departamentos) {
-            $pathDep = "OU=$dep,OU=Equipos,OU=Empresa,$dominioDN"
-            
-            # Solución al error de Substring: Si el nombre es corto (IT), usa el nombre completo
-            if ($dep.Length -lt 3) {
-                $prefijo = $dep.ToUpper()
-            } else {
-                $prefijo = $dep.Substring(0,3).ToUpper()
-            }
+Write-Host "Iniciando despliegue completo de la infraestructura..." -ForegroundColor Cyan
 
-            # Bucle para crear los equipos en cada una de las 5 ramas
-            for ($i = 1; $i -le 4; $i++) {
-                $nombrePC = "${prefijo}-PC0$i"
-                
-                try {
-                    if (-not (Get-ADComputer -Filter "Name -eq '$nombrePC'" -ErrorAction SilentlyContinue)) {
-                        New-ADComputer -Name $nombrePC -SamAccountName "$nombrePC$" -Path $pathDep -Enabled $true
-                        Write-Host "    [OK] Equipo ${nombrePC} creado en ${dep}." -ForegroundColor Gray
-                    }
-                } catch {
-                    # Uso de ${} para evitar el error de la captura image_c5aefc.png
-                    Write-Host "    [!] Error en PC ${nombrePC}: $($_.Exception.Message)" -ForegroundColor Red
-                }
-            }
-        }
-        Write-Host "--- PROCESO FINALIZADO ---" -ForegroundColor Green
-        Pause
+# 1. CREAR ESTRUCTURA DE OUs (Unidades Organizativas)
+$rutaEmpresa = "OU=Empresa,$dominioDN"
+if (-not (Get-ADOrganizationalUnit -Filter "DistinguishedName -eq '$rutaEmpresa'" -ErrorAction SilentlyContinue)) {
+    New-ADOrganizationalUnit -Name "Empresa" -Path $dominioDN
+}
+
+foreach ($tipo en @("Equipos", "Usuarios", "Grupos")) {
+    $rutaTipo = "OU=$tipo,$rutaEmpresa"
+    if (-not (Get-ADOrganizationalUnit -Filter "DistinguishedName -eq '$rutaTipo'" -ErrorAction SilentlyContinue)) {
+        New-ADOrganizationalUnit -Name $tipo -Path $rutaEmpresa
     }
+}
+
+# 2. CREAR RAMAS Y GRUPOS POR DEPARTAMENTO
+foreach ($dep in $departamentos) {
+    # OUs de cada departamento
+    $pathDepEquipos = "OU=$dep,OU=Equipos,$rutaEmpresa"
+    $pathDepUsuarios = "OU=$dep,OU=Usuarios,$rutaEmpresa"
+
+    if (-not (Get-ADOrganizationalUnit -Filter "DistinguishedName -eq '$pathDepEquipos'" -ErrorAction SilentlyContinue)) {
+        New-ADOrganizationalUnit -Name $dep -Path "OU=Equipos,$rutaEmpresa"
+    }
+    if (-not (Get-ADOrganizationalUnit -Filter "DistinguishedName -eq '$pathDepUsuarios'" -ErrorAction SilentlyContinue)) {
+        New-ADOrganizationalUnit -Name $dep -Path "OU=Usuarios,$rutaEmpresa"
+    }
+
+    # Crear Grupo del departamento
+    $nombreGrupo = "G_$dep"
+    if (-not (Get-ADGroup -Filter "Name -eq '$nombreGrupo'" -ErrorAction SilentlyContinue)) {
+        New-ADGroup -Name $nombreGrupo -GroupScope Global -Path "OU=Grupos,$rutaEmpresa"
+        Write-Host "  [+] Grupo ${nombreGrupo} creado." -ForegroundColor Green
+    }
+
+    # 3. CREAR EQUIPOS (4 por rama) - Solución al error de Substring e InvalidVariable
+    $prefijo = if ($dep.Length -lt 3) { $dep.ToUpper() } else { $dep.Substring(0,3).ToUpper() }
+
+    for ($i = 1; $i -le 4; $i++) {
+        $nombrePC = "${prefijo}-PC0$i"
+        try {
+            if (-not (Get-ADComputer -Filter "Name -eq '$nombrePC'" -ErrorAction SilentlyContinue)) {
+                New-ADComputer -Name $nombrePC -SamAccountName "${nombrePC}$" -Path $pathDepEquipos -Enabled $true
+                # El uso de ${} evita el error InvalidVariableReferenceWithDrive
+                Write-Host "    [OK] Equipo ${nombrePC}: Creado en ${dep}" -ForegroundColor Gray
+            }
+        } catch {
+            Write-Host "    [!] Error en PC ${nombrePC}: $($_.Exception.Message)" -ForegroundColor Red
+        }
+    }
+
+    # 4. CREAR USUARIO EJEMPLO (Opcional, 1 por rama)
+    $nombreUser = "User$dep"
+    if (-not (Get-ADUser -Filter "SamAccountName -eq '$nombreUser'" -ErrorAction SilentlyContinue)) {
+        $params = @{
+            'Name' = $nombreUser
+            'SamAccountName' = $nombreUser
+            'UserPrincipalName' = "$nombreUser@$upnSuffix"
+            'Path' = $pathDepUsuarios
+            'AccountPassword' = (ConvertTo-SecureString "Password123!" -AsPlainText -Force)
+            'Enabled' = $true
+        }
+        New-ADUser @params
+        Add-ADGroupMember -Identity $nombreGrupo -Members $nombreUser
+        Write-Host "    [OK] Usuario ${nombreUser} creado y añadido a ${nombreGrupo}" -ForegroundColor Yellow
+    }
+}
+
+Write-Host "`n--- DESPLIEGUE FINALIZADO CON ÉXITO ---" -ForegroundColor Green
         "5" {
             Write-Host "Abriendo archivos de registro..." -ForegroundColor Cyan
             if (Test-Path ".\provision-ad.log") { notepad ".\provision-ad.log" }
