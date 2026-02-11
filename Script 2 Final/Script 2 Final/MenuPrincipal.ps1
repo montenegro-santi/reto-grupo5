@@ -18,7 +18,7 @@ function Ejecutar-Rollback {
     
     # Verificamos si la OU existe antes de intentar borrar
     if (Get-ADOrganizationalUnit -Filter "DistinguishedName -eq '$targetOU'") {
-        $confirm = Read-Host "ADVERTENCIA: Se borraran TODOS los usuarios y grupos de '$targetOU'. ¿Proceder? (S/N)"
+        $confirm = Read-Host "ADVERTENCIA: Se borraran TODOS los usuarios y grupos de '$targetOU'. Proceder? (S/N)"
         if ($confirm -eq "S" -or $confirm -eq "s") {
             Write-Host "Limpiando infraestructura..." -ForegroundColor Yellow
             
@@ -185,19 +185,34 @@ do {
     $archivo = Get-ChildItem -Path "$PSScriptRoot\Backup_Total_*.csv" | Sort-Object LastWriteTime -Descending | Select-Object -First 1
     if ($archivo) {
         $datos = Import-Csv -Path $archivo.FullName -Encoding UTF8
+        
+        # 1. FUNCIÓN PARA ASEGURAR QUE LA RUTA PADRE EXISTE
+        function Crear-RutaJerarquica($dn) {
+            $partes = $dn.Split(",") | Where-Object { $_ -like "OU=*" }
+            $rutaActual = (Get-ADDomain).DistinguishedName
+            
+            # Recorremos la ruta de derecha a izquierda para crear las OUs
+            for ($i = $partes.Count - 1; $i -ge 0; $i--) {
+                $ouNombre = $partes[$i].Replace("OU=", "")
+                $nuevaRuta = "OU=$ouNombre,$rutaActual"
+                if (-not (Get-ADOrganizationalUnit -Filter "Name -eq '$ouNombre'" -SearchBase $rutaActual -SearchScope OneLevel)) {
+                    New-ADOrganizationalUnit -Name $ouNombre -Path $rutaActual
+                    Write-Host "[OK] Creada jerarquia: $ouNombre" -ForegroundColor Green
+                }
+                $rutaActual = $nuevaRuta
+            }
+        }
+
         foreach ($obj in $datos) {
-            # FUNCIÓN PRO: Quitar tildes del nombre para evitar errores
+            # Limpiamos tildes del nombre para evitar errores de caracteres raros
             $nombreLimpio = [Text.Encoding]::ASCII.GetString([Text.Encoding]::GetEncoding("Cyrillic").GetBytes($obj.Name))
             
             if ($obj.ObjectClass -eq "organizationalUnit") {
-                if (-not (Get-ADOrganizationalUnit -Filter "Name -eq '$nombreLimpio'")) {
-                    New-ADOrganizationalUnit -Name $nombreLimpio -Path ( (Get-ADDomain).DistinguishedName )
-                    Write-Host "OU Restaurada: $nombreLimpio" -ForegroundColor Green
-                }
+                Crear-RutaJerarquica $obj.DistinguishedName
             }
             elseif ($obj.ObjectClass -eq "group") {
                 if (-not (Get-ADGroup -Filter "Name -eq '$nombreLimpio'")) {
-                    New-ADGroup -Name $nombreLimpio -GroupScope Global
+                    New-ADGroup -Name $nombreLimpio -GroupScope Global -Path (Get-ADDomain).DistinguishedName
                     Write-Host "Grupo Restaurado: $nombreLimpio" -ForegroundColor Cyan
                 }
             }
@@ -211,9 +226,9 @@ do {
             elseif ($obj.ObjectClass -eq "computer") {
                 if (-not (Get-ADComputer -Filter "Name -eq '$nombreLimpio'")) {
                     New-ADComputer -Name $nombreLimpio -SamAccountName "$nombreLimpio$"
-                     Write-Host "Equipo Restaurado: $nombreLimpio" -ForegroundColor Gray
-    }
-}
+                    Write-Host "Equipo Restaurado: $nombreLimpio" -ForegroundColor Gray
+                }
+            }
         }
     }
     Pause
