@@ -91,7 +91,7 @@ do {
         }
        "7" { 
             Write-Host "`n--- ESTADO DE SALUD DEL SERVIDOR ---" -ForegroundColor Cyan
-            # Verificamos los 3 pilares de Active Directory
+            # Verificamos los 3 pilares de Active Directorya
             $servicios = @("dns", "adws", "ntds")
             foreach ($s in $servicios) {
                 $status = Get-Service $s -ErrorAction SilentlyContinue
