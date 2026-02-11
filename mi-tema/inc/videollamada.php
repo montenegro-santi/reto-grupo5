@@ -488,3 +488,95 @@ add_action('admin_post_seidor_vc_close', function () {
   wp_safe_redirect(admin_url('admin.php?page=seidor-vc-requests&msg=closed'));
   exit;
 });
+
+
+
+
+
+
+
+
+
+
+
+
+
+/**
+ * ==============================================================
+ * SISTEMA DE NOTIFICACIONES EN TIEMPO REAL PARA EL TÉCNICO
+ * ==============================================================
+ */
+
+/**
+ * 1. Endpoint AJAX para consultar solicitudes pendientes
+ */
+add_action('wp_ajax_seidor_vc_check_pending', function () {
+    if (!current_user_can('manage_options')) {
+        wp_send_json_error('No autorizado');
+    }
+
+    global $wpdb;
+    $table = seidor_vc_requests_table();
+
+    // Consultamos si existe alguna solicitud con estado 'pending'
+    $pending_count = $wpdb->get_var("SELECT COUNT(*) FROM $table WHERE status='pending'");
+
+    wp_send_json_success([
+        'has_pending' => (int)$pending_count > 0,
+        'count'       => (int)$pending_count
+    ]);
+});
+
+/**
+ * 2. Inyección de Script y Sonido en el Panel de Administración
+ */
+add_action('admin_footer', function () {
+    // Solo se ejecuta para usuarios con permisos de gestión (técnicos/admins)
+    if (!current_user_can('manage_options')) return;
+
+    // Evitar que salte la alerta si ya estamos en la página de solicitudes
+    $current_screen = get_current_screen();
+    if ($current_screen && $current_screen->id === 'seidor-incidencias-abiertas_page_seidor-vc-requests') {
+        return;
+    }
+    ?>
+    <script>
+    (function($) {
+        let alertActive = false;
+        // Sonido de notificación (puedes cambiar la URL por cualquier .mp3)
+        const notificationSound = new Audio('https://assets.mixkit.co/active_storage/sfx/2358/2358-preview.mp3');
+
+        function checkNewCalls() {
+            if (alertActive) return; 
+
+            $.ajax({
+                url: ajaxurl,
+                data: { action: 'seidor_vc_check_pending' },
+                success: function(response) {
+                    if (response.success && response.data.has_pending) {
+                        alertActive = true;
+                        
+                        // Reproducir sonido
+                        notificationSound.play().catch(e => console.log("El navegador bloqueó el audio inicial."));
+
+                        // Ventana emergente (Pop-up)
+                        if (confirm("🔔 ¡ATENCIÓN!\n\nHay " + response.data.count + " solicitud(es) de videollamada pendiente(s).\n\n¿Deseas ir al panel de gestión ahora?")) {
+                            window.location.href = "<?php echo admin_url('admin.php?page=seidor-vc-requests'); ?>";
+                        } else {
+                            // Si el técnico cancela, silenciar la alerta por 2 minutos para no ser molesto
+                            setTimeout(() => { alertActive = false; }, 120000);
+                        }
+                    }
+                }
+            });
+        }
+
+        // Ejecutar revisión cada 20 segundos
+        setInterval(checkNewCalls, 20000);
+        
+        // Primera revisión al cargar el escritorio
+        setTimeout(checkNewCalls, 2000); 
+    })(jQuery);
+    </script>
+    <?php
+});
