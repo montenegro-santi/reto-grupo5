@@ -74,47 +74,46 @@ do {
             .\moverequipos.ps1
             Pause
         }
-        "4"{
-    Write-Host "--- INICIANDO PROCESO DE AUTOMATIZACION COMPLETO ---" -ForegroundColor Cyan
-    
+        "4" {
+    Write-Host "--- INICIANDO AUTOMATIZACION TOTAL (ESTRUCTURA COMPLETA) ---" -ForegroundColor Cyan
     $dominioDN = (Get-ADDomain).DistinguishedName
     $upnSuffix = (Get-ADDomain).DNSRoot
+    $departamentos = @("Finanzas", "IT", "RRHH", "Soporte", "Ventas")
 
-    # 1. Crear Usuarios y Grupos (Llamando a tu script Creausuarios.ps1)
+    # PASO 1: Crear la estructura base de carpetas (OUs)
+    Write-Host "[1/3] Asegurando estructura de carpetas de Equipos..." -ForegroundColor Yellow
+    $rutaEmpresa = "OU=Empresa,$dominioDN"
+    $rutaEquiposBase = "OU=Equipos,$rutaEmpresa"
+
+    # Creamos 'Equipos' dentro de 'Empresa' si no existe
+    if (-not (Get-ADOrganizationalUnit -Filter "DistinguishedName -eq '$rutaEquiposBase'" -ErrorAction SilentlyContinue)) {
+        New-ADOrganizationalUnit -Name "Equipos" -Path $rutaEmpresa
+    }
+
+    # Creamos cada departamento dentro de Equipos
+    foreach ($dep in $departamentos) {
+        $rutaDepEquipo = "OU=$dep,$rutaEquiposBase"
+        if (-not (Get-ADOrganizationalUnit -Filter "DistinguishedName -eq '$rutaDepEquipo'" -ErrorAction SilentlyContinue)) {
+            New-ADOrganizationalUnit -Name $dep -Path $rutaEquiposBase
+            Write-Host "  > Carpeta de equipo creada: $dep" -ForegroundColor Green
+        }
+    }
+
+    # PASO 2: Crear Usuarios y Grupos (Usando tu script existente)
+    Write-Host "[2/3] Creando Usuarios y Grupos de seguridad..." -ForegroundColor Yellow
     if (Test-Path ".\Creausuarios.ps1") {
-        Write-Host "[1/2] Creando OUs, Grupos y Usuarios..." -ForegroundColor Yellow
         .\Creausuarios.ps1 -CsvPath ".\usuarios.csv" -DomainDN $dominioDN -UpnSuffix $upnSuffix -Delimiter ";"
     }
 
-    # 2. Crear Equipos en sus Unidades Organizativas (OUs)
-    Write-Host "[2/2] Creando objetos de equipo en sus departamentos..." -ForegroundColor Yellow
-    
-    # Lista de departamentos basada en tu estructura
-    $departamentos = @("Finanzas", "IT", "RRHH", "Soporte", "Ventas")
-    
+    # PASO 3: Crear los Equipos dentro de las nuevas carpetas
+    Write-Host "[3/3] Asignando equipos a sus departamentos..." -ForegroundColor Yellow
     foreach ($dep in $departamentos) {
-        # Definimos la ruta donde deben ir los equipos: Empresa > Equipos > Departamento
-        $rutaEquipos = "OU=$dep,OU=Equipos,OU=Empresa,$dominioDN"
+        $rutaDestino = "OU=$dep,$rutaEquiposBase"
+        $nombrePC = "$($dep.Substring(0,3).ToUpper())-PC01"
         
-        # Pequeña pausa para asegurar que el AD ha refrescado las OUs creadas arriba
-        Start-Sleep -Milliseconds 500
-
-        if (Get-ADOrganizationalUnit -Filter "DistinguishedName -eq '$rutaEquipos'" -ErrorAction SilentlyContinue) {
-            # Nombre del equipo: Primeras 3 letras del dep + PC01 (Ej: FIN-PC01)
-            $nombrePC = "$($dep.Substring(0,3).ToUpper())-PC01"
-            
-            if (-not (Get-ADComputer -Filter "Name -eq '$nombrePC'")) {
-                try {
-                    New-ADComputer -Name $nombrePC -SamAccountName "$nombrePC$" -Path $rutaEquipos -Enabled $true
-                    Write-Host "[OK] Equipo $nombrePC creado en OU $dep" -ForegroundColor Gray
-                } catch {
-                    Write-Host "[!] Error al crear $nombrePC: $($_.Exception.Message)" -ForegroundColor Red
-                }
-            } else {
-                Write-Host "[i] El equipo $nombrePC ya existe." -ForegroundColor DarkGray
-            }
-        } else {
-            Write-Host "[!] Advertencia: No se encontro la carpeta $rutaEquipos" -ForegroundColor Red
+        if (-not (Get-ADComputer -Filter "Name -eq '$nombrePC'")) {
+            New-ADComputer -Name $nombrePC -SamAccountName "$nombrePC$" -Path $rutaDestino -Enabled $true
+            Write-Host "[OK] $nombrePC creado en $rutaDestino" -ForegroundColor Gray
         }
     }
 
