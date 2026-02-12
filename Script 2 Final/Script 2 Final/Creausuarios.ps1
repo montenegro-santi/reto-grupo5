@@ -136,25 +136,24 @@ function Ensure-DeptSecurityGroup {
   )
 
   $safeDept = (Normalize-Login $DepartmentName)
-  if (-not $safeDept) { $safeDept = "dept" }
+  $groupName = "GS_$safeDept"
 
-  $groupName = "GS_$safeDept"   # ej: GS_it, GS_rrhh
+  # Buscamos si el grupo ya existe en TODO el dominio
+  $existingGroup = Get-ADGroup -Filter "SamAccountName -eq '$groupName'" -ErrorAction SilentlyContinue
 
-  try {
-    Get-ADGroup -Identity $groupName -ErrorAction Stop | Out-Null
-    Write-Log "Comprobar grupo $groupName" "OK (existe)"
-  } catch {
-    if ($WhatIf) {
-      Write-Log "Crear grupo $groupName en $GroupPathDN" "WHATIF"
-    } else {
-      New-ADGroup -Name $groupName -SamAccountName $groupName -GroupScope Global -GroupCategory Security -Path $GroupPathDN -Description "Grupo de seguridad para $DepartmentName" | Out-Null
-      Write-Log "Crear grupo $groupName en $GroupPathDN" "OK (creado)"
-    }
+  if ($existingGroup) {
+      # Si existe pero está en el lugar equivocado, lo movemos
+      if ($existingGroup.DistinguishedName -notlike "*$GroupPathDN*") {
+          Move-ADObject -Identity $existingGroup.DistinguishedName -TargetPath $GroupPathDN
+          Write-Log "Mover grupo $groupName" "OK (movido a $GroupPathDN)"
+      }
+  } else {
+      # Si no existe, lo creamos directamente en la carpeta del departamento
+      New-ADGroup -Name $groupName -SamAccountName $groupName -GroupScope Global -GroupCategory Security -Path $GroupPathDN -Description "Grupo para $DepartmentName"
+      Write-Log "Crear grupo $groupName" "OK (creado en $GroupPathDN)"
   }
-
   return $groupName
 }
-
 # ---------------------------
 # BLOQUE 6: Autodetección dominio
 # ---------------------------
